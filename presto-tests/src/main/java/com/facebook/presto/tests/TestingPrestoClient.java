@@ -51,6 +51,7 @@ import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DateTimeEncoding.unpackMillisUtc;
 import static com.facebook.presto.spi.type.DateType.DATE;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
+import static com.facebook.presto.spi.type.FloatType.FLOAT;
 import static com.facebook.presto.spi.type.IntegerType.INTEGER;
 import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
 import static com.facebook.presto.spi.type.TimeType.TIME;
@@ -211,6 +212,9 @@ public class TestingPrestoClient
         }
         else if (DOUBLE.equals(type)) {
             return ((Number) value).doubleValue();
+        }
+        else if (FLOAT.equals(type)) {
+            return ((Number) value).floatValue();
         }
         else if (type instanceof VarcharType) {
             return value;
