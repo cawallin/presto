@@ -20,6 +20,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Objects;
 
+import static com.facebook.presto.spi.type.FloatType.FLOAT;
 import static java.util.Objects.requireNonNull;
 
 // TODO: When we move RowExpressions to the SPI, we should get rid of this. This is effectively a ConstantExpression.
@@ -31,7 +32,7 @@ public final class NullableValue
     public NullableValue(Type type, Object value)
     {
         requireNonNull(type, "type is null");
-        if (value != null && !Primitives.wrap(type.getJavaType()).isInstance(value)) {
+        if (value != null && (!Primitives.wrap(type.getJavaType()).isInstance(value) || (FLOAT.equals(type) && value instanceof Long))) {
             throw new IllegalArgumentException(String.format("Object '%s' does not match type %s", value, type.getJavaType()));
         }
 

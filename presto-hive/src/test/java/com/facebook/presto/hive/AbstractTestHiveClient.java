@@ -202,6 +202,7 @@ public abstract class AbstractTestHiveClient
             .add(new ColumnMetadata("t_smallint", SMALLINT))
             .add(new ColumnMetadata("t_integer", INTEGER))
             .add(new ColumnMetadata("t_bigint", BIGINT))
+            .add(new ColumnMetadata("t_float", FLOAT))
             .add(new ColumnMetadata("t_double", DOUBLE))
             .add(new ColumnMetadata("t_boolean", BOOLEAN))
             .add(new ColumnMetadata("t_array", ARRAY_TYPE))
