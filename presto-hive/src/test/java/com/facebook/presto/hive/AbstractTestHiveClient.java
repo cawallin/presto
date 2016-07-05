@@ -2508,6 +2508,9 @@ public abstract class AbstractTestHiveClient
                 else if (DOUBLE.equals(column.getType())) {
                     assertInstanceOf(value, Double.class);
                 }
+                else if (FLOAT.equals(column.getType())) {
+                    assertInstanceOf(value, Float.class);
+                }
                 else if (isVarcharType(column.getType())) {
                     assertInstanceOf(value, String.class);
                 }
