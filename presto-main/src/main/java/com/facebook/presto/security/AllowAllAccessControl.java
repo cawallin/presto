@@ -128,4 +128,9 @@ public class AllowAllAccessControl
     public void checkCanSetCatalogSessionProperty(Identity identity, String catalogName, String propertyName)
     {
     }
+
+    @Override
+    public void checkCanShowCatalog(Identity identity, String catalogName)
+    {
+    }
 }

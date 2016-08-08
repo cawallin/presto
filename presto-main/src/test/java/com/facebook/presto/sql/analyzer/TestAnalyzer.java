@@ -34,6 +34,7 @@ import com.facebook.presto.spi.connector.Connector;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.sql.parser.SqlParser;
 import com.facebook.presto.sql.tree.Statement;
+import com.facebook.presto.testing.TestingAccessControlManager;
 import com.facebook.presto.transaction.LegacyTransactionConnector;
 import com.facebook.presto.transaction.TransactionManager;
 import com.facebook.presto.type.ArrayType;
@@ -1040,7 +1041,8 @@ public class TestAnalyzer
                 new SessionPropertyManager(),
                 new SchemaPropertyManager(),
                 new TablePropertyManager(),
-                transactionManager);
+                transactionManager,
+                new TestingAccessControlManager(transactionManager));
         metadata.registerConnectorCatalog(TPCH_CONNECTOR_ID, TPCH_CATALOG);
         metadata.registerConnectorCatalog(SECOND_CONNECTOR_ID, SECOND_CATALOG);
         metadata.registerConnectorCatalog(THIRD_CONNECTOR_ID, THIRD_CATALOG);

@@ -50,6 +50,7 @@ import org.weakref.jmx.guice.MBeanModule;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static com.facebook.presto.server.PrestoSystemRequirements.verifyJvmRequirements;
@@ -157,7 +158,7 @@ public class PrestoServer
 
         // automatically build connectorIds if not configured
         if (connectorIds.isEmpty()) {
-            Map<String, ConnectorId> catalogNames = metadata.getCatalogNames();
+            Map<String, ConnectorId> catalogNames = metadata.getCatalogNames(Optional.empty());
             // if this is a dedicated coordinator, only add jmx
             if (serverConfig.isCoordinator() && !schedulerConfig.isIncludeCoordinator()) {
                 if (catalogNames.containsKey("jmx")) {

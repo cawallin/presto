@@ -28,6 +28,7 @@ import com.facebook.presto.spi.predicate.TupleDomain;
 import javax.inject.Inject;
 
 import java.util.Map;
+import java.util.Optional;
 
 import static com.facebook.presto.metadata.MetadataUtil.TableMetadataBuilder.tableMetadataBuilder;
 import static com.facebook.presto.spi.SystemTable.Distribution.SINGLE_COORDINATOR;
@@ -67,8 +68,8 @@ public class CatalogSystemTable
     public RecordCursor cursor(ConnectorTransactionHandle transactionHandle, ConnectorSession session, TupleDomain<Integer> constraint)
     {
         Builder table = InMemoryRecordSet.builder(CATALOG_TABLE);
-        for (Map.Entry<String, ConnectorId> entry : metadata.getCatalogNames().entrySet()) {
-            table.addRow(entry.getKey(), entry.getValue().toString());
+        for (Map.Entry<String, ConnectorId> entry : metadata.getCatalogNames(Optional.of(session.getIdentity())).entrySet()) {
+            table.addRow(entry.getKey(), entry.getValue());
         }
         return table.build().cursor();
     }

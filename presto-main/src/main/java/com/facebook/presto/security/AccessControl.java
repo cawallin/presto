@@ -148,4 +148,10 @@ public interface AccessControl
      * @throws com.facebook.presto.spi.security.AccessDeniedException if not allowed
      */
     void checkCanSetCatalogSessionProperty(Identity identity, String catalogName, String propertyName);
+
+    /**
+     * Check if identity is allowed to set the specified catalog.
+     * @throws com.facebook.presto.spi.security.AccessDeniedException if not allowed
+     */
+    void checkCanShowCatalog(Identity identity, String catalogName);
 }

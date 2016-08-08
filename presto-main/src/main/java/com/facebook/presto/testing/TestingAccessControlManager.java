@@ -47,6 +47,7 @@ import static com.facebook.presto.spi.security.AccessDeniedException.denySelectV
 import static com.facebook.presto.spi.security.AccessDeniedException.denySetCatalogSessionProperty;
 import static com.facebook.presto.spi.security.AccessDeniedException.denySetSystemSessionProperty;
 import static com.facebook.presto.spi.security.AccessDeniedException.denySetUser;
+import static com.facebook.presto.spi.security.AccessDeniedException.denyShowCatalog;
 import static com.facebook.presto.testing.TestingAccessControlManager.TestingPrivilegeType.ADD_COLUMN;
 import static com.facebook.presto.testing.TestingAccessControlManager.TestingPrivilegeType.CREATE_SCHEMA;
 import static com.facebook.presto.testing.TestingAccessControlManager.TestingPrivilegeType.CREATE_TABLE;
@@ -65,7 +66,9 @@ import static com.facebook.presto.testing.TestingAccessControlManager.TestingPri
 import static com.facebook.presto.testing.TestingAccessControlManager.TestingPrivilegeType.SELECT_VIEW;
 import static com.facebook.presto.testing.TestingAccessControlManager.TestingPrivilegeType.SET_SESSION;
 import static com.facebook.presto.testing.TestingAccessControlManager.TestingPrivilegeType.SET_USER;
+import static com.facebook.presto.testing.TestingAccessControlManager.TestingPrivilegeType.SHOW_CATALOG;
 import static com.google.common.base.MoreObjects.toStringHelper;
+
 import static java.util.Objects.requireNonNull;
 
 public class TestingAccessControlManager
@@ -305,6 +308,17 @@ public class TestingAccessControlManager
         }
     }
 
+    @Override
+    public void checkCanShowCatalog(Identity identity, String catalogName)
+    {
+        if (shouldDenyPrivilege(identity.getUser(), catalogName, SHOW_CATALOG)) {
+            denyShowCatalog(catalogName);
+        }
+        if (denyPrivileges.isEmpty()) {
+            super.checkCanShowCatalog(identity, catalogName);
+        }
+    }
+
     private boolean shouldDenyPrivilege(String userName, String entityName, TestingPrivilegeType type)
     {
         TestingPrivilege testPrivilege = privilege(userName, entityName, type);
@@ -324,7 +338,7 @@ public class TestingAccessControlManager
         ADD_COLUMN, RENAME_COLUMN,
         CREATE_VIEW, DROP_VIEW, SELECT_VIEW,
         CREATE_VIEW_WITH_SELECT_TABLE, CREATE_VIEW_WITH_SELECT_VIEW,
-        SET_SESSION
+        SET_SESSION, SHOW_CATALOG
     }
 
     public static class TestingPrivilege

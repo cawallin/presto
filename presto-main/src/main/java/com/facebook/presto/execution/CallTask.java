@@ -41,6 +41,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Predicate;
 
@@ -74,7 +75,7 @@ public class CallTask
 
         Session session = stateMachine.getSession();
         QualifiedObjectName procedureName = createQualifiedObjectName(session, call, call.getName());
-        ConnectorId connectorId = metadata.getCatalogNames().get(procedureName.getCatalogName());
+        ConnectorId connectorId = metadata.getCatalogNames(Optional.empty()).get(procedureName.getCatalogName());
         if (connectorId == null) {
             throw new SemanticException(MISSING_CATALOG, call, "Catalog %s does not exist", procedureName.getCatalogName());
         }

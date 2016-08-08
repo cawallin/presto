@@ -22,6 +22,7 @@ import com.facebook.presto.spi.ConnectorTableMetadata;
 import com.facebook.presto.spi.Constraint;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
 import com.facebook.presto.spi.predicate.TupleDomain;
+import com.facebook.presto.spi.security.Identity;
 import com.facebook.presto.spi.security.Privilege;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
@@ -221,7 +222,7 @@ public interface Metadata
      * @return Map of catalog name to connector id
      */
     @NotNull
-    Map<String, ConnectorId> getCatalogNames();
+    Map<String, ConnectorId> getCatalogNames(Optional<Identity> identity);
 
     /**
      * Get the names that match the specified table prefix (never null).

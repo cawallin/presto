@@ -439,6 +439,17 @@ public class AccessControlManager
         }
     }
 
+    @Override
+    public void checkCanShowCatalog(Identity identity, String catalogName)
+    {
+        authorizationCheck(() -> systemAccessControl.get().checkCanShowCatalog(identity, catalogName));
+
+        CatalogAccessControlEntry entry = catalogAccessControl.get(catalogName);
+        if (entry != null) {
+            authorizationCheck(() -> entry.getAccessControl().checkCanShowCatalog(identity, catalogName));
+        }
+    }
+
     @Managed
     @Nested
     public CounterStat getAuthenticationSuccess()
@@ -566,6 +577,10 @@ public class AccessControlManager
 
         @Override
         public void checkCanRenameSchema(Identity identity, CatalogSchemaName schema, String newSchemaName)
+        {
+        }
+
+        public void checkCanShowCatalog(Identity identity, String catalogName)
         {
         }
 

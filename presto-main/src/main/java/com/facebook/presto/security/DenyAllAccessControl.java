@@ -41,6 +41,7 @@ import static com.facebook.presto.spi.security.AccessDeniedException.denySelectV
 import static com.facebook.presto.spi.security.AccessDeniedException.denySetCatalogSessionProperty;
 import static com.facebook.presto.spi.security.AccessDeniedException.denySetSystemSessionProperty;
 import static com.facebook.presto.spi.security.AccessDeniedException.denySetUser;
+import static com.facebook.presto.spi.security.AccessDeniedException.denyShowCatalog;
 
 public class DenyAllAccessControl
         implements AccessControl
@@ -169,5 +170,11 @@ public class DenyAllAccessControl
     public void checkCanSetCatalogSessionProperty(Identity identity, String catalogName, String propertyName)
     {
         denySetCatalogSessionProperty(catalogName, propertyName);
+    }
+
+    @Override
+    public void checkCanShowCatalog(Identity identity, String catalogName)
+    {
+        denyShowCatalog(catalogName);
     }
 }

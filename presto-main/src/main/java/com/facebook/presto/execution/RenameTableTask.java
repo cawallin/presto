@@ -54,7 +54,7 @@ public class RenameTableTask
         }
 
         QualifiedObjectName target = createQualifiedObjectName(session, statement, statement.getTarget());
-        if (!metadata.getCatalogNames().containsKey(target.getCatalogName())) {
+        if (!metadata.getCatalogNames(Optional.of(session.getIdentity())).containsKey(target.getCatalogName())) {
             throw new SemanticException(MISSING_CATALOG, statement, "Target catalog '%s' does not exist", target.getCatalogName());
         }
         if (metadata.getTableHandle(session, target).isPresent()) {

@@ -50,6 +50,12 @@ public class LegacyConnectorAccessControl
     }
 
     @Override
+    public void checkCanShowCatalog(Identity identity, String catalogName)
+    {
+        // allow all
+    }
+
+    @Override
     public void checkCanCreateTable(ConnectorTransactionHandle transactionHandle, Identity identity, SchemaTableName tableName)
     {
         accessControl.checkCanCreateTable(identity, tableName);

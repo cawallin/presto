@@ -35,6 +35,11 @@ public class ReadOnlyAccessControl
         implements ConnectorAccessControl
 {
     @Override
+    public void checkCanShowCatalog(Identity identity, String catalogName)
+    {
+    }
+
+    @Override
     public void checkCanAddColumn(ConnectorTransactionHandle transaction, Identity identity, SchemaTableName tableName)
     {
         denyAddColumn(tableName.toString());

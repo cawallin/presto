@@ -25,6 +25,8 @@ import com.facebook.presto.spi.predicate.TupleDomain;
 
 import javax.inject.Inject;
 
+import java.util.Optional;
+
 import static com.facebook.presto.metadata.MetadataUtil.TableMetadataBuilder.tableMetadataBuilder;
 import static com.facebook.presto.spi.type.VarcharType.createUnboundedVarcharType;
 import static java.util.Objects.requireNonNull;
@@ -56,7 +58,7 @@ public class CatalogJdbcTable
     public RecordCursor cursor(ConnectorTransactionHandle transactionHandle, ConnectorSession session, TupleDomain<Integer> constraint)
     {
         Builder table = InMemoryRecordSet.builder(METADATA);
-        for (String name : metadata.getCatalogNames().keySet()) {
+        for (String name : metadata.getCatalogNames(Optional.of(session.getIdentity())).keySet()) {
             table.addRow(name);
         }
         return table.build().cursor();

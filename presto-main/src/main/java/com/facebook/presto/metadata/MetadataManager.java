@@ -16,6 +16,8 @@ package com.facebook.presto.metadata;
 import com.facebook.presto.Session;
 import com.facebook.presto.block.BlockEncodingManager;
 import com.facebook.presto.connector.ConnectorId;
+import com.facebook.presto.security.AccessControl;
+import com.facebook.presto.security.AllowAllAccessControl;
 import com.facebook.presto.spi.CatalogSchemaName;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
@@ -39,6 +41,8 @@ import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
 import com.facebook.presto.spi.function.OperatorType;
 import com.facebook.presto.spi.predicate.NullableValue;
 import com.facebook.presto.spi.predicate.TupleDomain;
+import com.facebook.presto.spi.security.AccessDeniedException;
+import com.facebook.presto.spi.security.Identity;
 import com.facebook.presto.spi.security.Privilege;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
@@ -120,6 +124,7 @@ public class MetadataManager
     private final SchemaPropertyManager schemaPropertyManager;
     private final TablePropertyManager tablePropertyManager;
     private final TransactionManager transactionManager;
+    private final AccessControl accessControl;
 
     public MetadataManager(FeaturesConfig featuresConfig,
             TypeManager typeManager,
@@ -127,7 +132,8 @@ public class MetadataManager
             SessionPropertyManager sessionPropertyManager,
             SchemaPropertyManager schemaPropertyManager,
             TablePropertyManager tablePropertyManager,
-            TransactionManager transactionManager)
+            TransactionManager transactionManager,
+            AccessControl accessControl)
     {
         this(featuresConfig,
                 typeManager,
@@ -136,7 +142,8 @@ public class MetadataManager
                 sessionPropertyManager,
                 schemaPropertyManager,
                 tablePropertyManager,
-                transactionManager);
+                transactionManager,
+                accessControl);
     }
 
     @Inject
@@ -147,7 +154,8 @@ public class MetadataManager
             SessionPropertyManager sessionPropertyManager,
             SchemaPropertyManager schemaPropertyManager,
             TablePropertyManager tablePropertyManager,
-            TransactionManager transactionManager)
+            TransactionManager transactionManager,
+            AccessControl accessControl)
     {
         functions = new FunctionRegistry(typeManager, blockEncodingSerde, featuresConfig);
         procedures = new ProcedureRegistry();
@@ -158,6 +166,7 @@ public class MetadataManager
         this.schemaPropertyManager = requireNonNull(schemaPropertyManager, "schemaPropertyManager is null");
         this.tablePropertyManager = requireNonNull(tablePropertyManager, "tablePropertyManager is null");
         this.transactionManager = requireNonNull(transactionManager, "transactionManager is null");
+        this.accessControl = requireNonNull(accessControl, "accessControl is null");
 
         verifyComparableOrderableContract();
     }
@@ -172,7 +181,8 @@ public class MetadataManager
                 new SessionPropertyManager(),
                 new SchemaPropertyManager(),
                 new TablePropertyManager(),
-                createTestTransactionManager());
+                createTestTransactionManager(),
+                new AllowAllAccessControl());
     }
 
     public synchronized void registerConnectorCatalog(ConnectorId connectorId, String catalogName)
@@ -655,11 +665,16 @@ public class MetadataManager
     }
 
     @Override
-    public Map<String, ConnectorId> getCatalogNames()
+    public Map<String, ConnectorId> getCatalogNames(Optional<Identity> identity)
     {
         ImmutableMap.Builder<String, ConnectorId> catalogsMap = ImmutableMap.builder();
         for (Map.Entry<String, ConnectorEntry> entry : connectorsByCatalog.entrySet()) {
-            catalogsMap.put(entry.getKey(), entry.getValue().getConnectorId());
+            try {
+                identity.ifPresent(id -> accessControl.checkCanShowCatalog(id, entry.getKey()));
+                catalogsMap.put(entry.getKey(), entry.getValue().getConnectorId());
+            }
+            catch (AccessDeniedException ignore) {
+            }
         }
         return catalogsMap.build();
     }
