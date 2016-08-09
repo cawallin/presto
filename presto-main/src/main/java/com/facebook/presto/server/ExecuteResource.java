@@ -17,7 +17,6 @@ import com.facebook.presto.Session;
 import com.facebook.presto.client.ClientSession;
 import com.facebook.presto.client.Column;
 import com.facebook.presto.client.QueryResults;
-import com.facebook.presto.client.QuerySubmission;
 import com.facebook.presto.client.StatementClient;
 import com.facebook.presto.execution.QueryIdGenerator;
 import com.facebook.presto.metadata.SessionPropertyManager;
