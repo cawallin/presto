@@ -212,7 +212,7 @@ public class TestHiveStorageFormats
     }
 
     @Requires(ImmutableLineItemTable.class)
-    @Test(groups = {STORAGE_FORMATS, BIG_QUERY})
+    @Test(groups = {BIG_QUERY})
     public void testSelectFromPartitionedBzipTable() throws Exception
     {
         // This test is marked as "big_query" because INSERT OVERWRITE TABLE is very slow, but that
