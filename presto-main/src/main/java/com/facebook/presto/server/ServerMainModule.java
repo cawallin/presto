@@ -394,6 +394,7 @@ public class ServerMainModule
 
         // Spiller
         binder.bind(SpillerFactory.class).to(BinarySpillerFactory.class).in(Scopes.SINGLETON);
+        newExporter(binder).export(SpillerFactory.class).withGeneratedName();
     }
 
     @Provides
