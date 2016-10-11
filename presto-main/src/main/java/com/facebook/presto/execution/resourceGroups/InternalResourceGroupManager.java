@@ -16,6 +16,7 @@ package com.facebook.presto.execution.resourceGroups;
 import com.facebook.presto.Session;
 import com.facebook.presto.execution.QueryExecution;
 import com.facebook.presto.execution.resourceGroups.InternalResourceGroup.RootInternalResourceGroup;
+import com.facebook.presto.server.PluginManagerConfig;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.memory.ClusterMemoryPoolManager;
 import com.facebook.presto.spi.resourceGroups.ResourceGroupConfigurationManager;
@@ -71,7 +72,7 @@ public final class InternalResourceGroupManager
         implements ResourceGroupManager
 {
     private static final Logger log = Logger.get(InternalResourceGroupManager.class);
-    private static final File RESOURCE_GROUPS_CONFIGURATION = new File("etc/resource-groups.properties");
+    private static final String RESOURCE_GROUP_CONFIG_FILE_NAME = "resource-groups.properties";
     private static final String CONFIGURATION_MANAGER_PROPERTY_NAME = "resource-groups.configuration-manager";
 
     private final ScheduledExecutorService refreshExecutor = newSingleThreadScheduledExecutor(daemonThreadsNamed("ResourceGroupManager"));
@@ -83,14 +84,16 @@ public final class InternalResourceGroupManager
     private final AtomicBoolean started = new AtomicBoolean();
     private final AtomicLong lastCpuQuotaGenerationNanos = new AtomicLong(System.nanoTime());
     private final Map<String, ResourceGroupConfigurationManagerFactory> configurationManagerFactories = new ConcurrentHashMap<>();
+    private final File resourcesGroupConfiguration;
 
     @Inject
-    public InternalResourceGroupManager(LegacyResourceGroupConfigurationManagerFactory builtinFactory, ClusterMemoryPoolManager memoryPoolManager, MBeanExporter exporter)
+    public InternalResourceGroupManager(LegacyResourceGroupConfigurationManagerFactory builtinFactory, ClusterMemoryPoolManager memoryPoolManager, MBeanExporter exporter, PluginManagerConfig config)
     {
         this.exporter = requireNonNull(exporter, "exporter is null");
         this.memoryPoolManager = requireNonNull(memoryPoolManager, "memoryPoolManager is null");
         requireNonNull(builtinFactory, "builtinFactory is null");
         addConfigurationManagerFactory(builtinFactory);
+        resourcesGroupConfiguration = new File(config.getPluginConfigurationDir(), RESOURCE_GROUP_CONFIG_FILE_NAME);
     }
 
     @Override
@@ -128,12 +131,12 @@ public final class InternalResourceGroupManager
     public void loadConfigurationManager()
             throws Exception
     {
-        if (RESOURCE_GROUPS_CONFIGURATION.exists()) {
-            Map<String, String> properties = new HashMap<>(loadProperties(RESOURCE_GROUPS_CONFIGURATION));
+        if (resourcesGroupConfiguration.exists()) {
+            Map<String, String> properties = new HashMap<>(loadProperties(resourcesGroupConfiguration));
 
             String configurationManagerName = properties.remove(CONFIGURATION_MANAGER_PROPERTY_NAME);
             checkArgument(!isNullOrEmpty(configurationManagerName),
-                    "Resource groups configuration %s does not contain %s", RESOURCE_GROUPS_CONFIGURATION.getAbsoluteFile(), CONFIGURATION_MANAGER_PROPERTY_NAME);
+                    "Resource groups configuration %s does not contain %s", resourcesGroupConfiguration.getAbsoluteFile(), CONFIGURATION_MANAGER_PROPERTY_NAME);
 
             setConfigurationManager(configurationManagerName, properties);
         }
