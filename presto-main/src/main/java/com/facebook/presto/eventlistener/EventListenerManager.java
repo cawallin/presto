@@ -14,6 +14,7 @@
 
 package com.facebook.presto.eventlistener;
 
+import com.facebook.presto.server.PluginManagerConfig;
 import com.facebook.presto.spi.eventlistener.EventListener;
 import com.facebook.presto.spi.eventlistener.EventListenerFactory;
 import com.facebook.presto.spi.eventlistener.QueryCompletedEvent;
@@ -22,6 +23,8 @@ import com.facebook.presto.spi.eventlistener.SplitCompletedEvent;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.log.Logger;
+
+import javax.inject.Inject;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -42,11 +45,18 @@ import static java.util.Objects.requireNonNull;
 public class EventListenerManager
 {
     private static final Logger log = Logger.get(EventListenerManager.class);
-    private static final File EVENT_LISTENER_CONFIGURATION = new File("etc/event-listener.properties");
+    private static final String EVENT_LISTENER_CONFIG_FILE_NAME = "event-listener.properties";
     private static final String EVENT_LISTENER_PROPERTY_NAME = "event-listener.name";
 
+    private final File eventListenerConfiguration;
     private final Map<String, EventListenerFactory> eventListenerFactories = new ConcurrentHashMap<>();
     private final AtomicReference<Optional<EventListener>> configuredEventListener = new AtomicReference<>(Optional.empty());
+
+    @Inject
+    public EventListenerManager(PluginManagerConfig config)
+    {
+        eventListenerConfiguration = new File(config.getPluginConfigurationDir(), EVENT_LISTENER_CONFIG_FILE_NAME);
+    }
 
     public void addEventListenerFactory(EventListenerFactory eventListenerFactory)
     {
@@ -60,12 +70,12 @@ public class EventListenerManager
     public void loadConfiguredEventListener()
             throws Exception
     {
-        if (EVENT_LISTENER_CONFIGURATION.exists()) {
-            Map<String, String> properties = new HashMap<>(loadProperties(EVENT_LISTENER_CONFIGURATION));
+        if (eventListenerConfiguration.exists()) {
+            Map<String, String> properties = new HashMap<>(loadProperties(eventListenerConfiguration));
 
             String eventListenerName = properties.remove(EVENT_LISTENER_PROPERTY_NAME);
             checkArgument(!isNullOrEmpty(eventListenerName),
-                    "Access control configuration %s does not contain %s", EVENT_LISTENER_CONFIGURATION.getAbsoluteFile(), EVENT_LISTENER_PROPERTY_NAME);
+                    "Access control configuration %s does not contain %s", eventListenerConfiguration, EVENT_LISTENER_PROPERTY_NAME);
 
             setConfiguredEventListener(eventListenerName, properties);
         }

@@ -262,7 +262,8 @@ public class LocalQueryRunner
 
         this.splitManager = new SplitManager();
         this.blockEncodingSerde = new BlockEncodingManager(typeRegistry);
-        this.accessControl = new TestingAccessControlManager(transactionManager, new PluginManagerConfig());
+        PluginManagerConfig pluginManagerConfig = new PluginManagerConfig();
+        this.accessControl = new TestingAccessControlManager(transactionManager, pluginManagerConfig);
         this.metadata = new MetadataManager(
                 featuresConfig,
                 typeRegistry,
@@ -272,7 +273,7 @@ public class LocalQueryRunner
                 new TablePropertyManager(),
                 transactionManager,
                 accessControl);
-        this.eventListener = new TestingEventListenerManager();
+        this.eventListener = new TestingEventListenerManager(pluginManagerConfig);
         this.pageSourceManager = new PageSourceManager();
 
         this.expressionCompiler = new ExpressionCompiler(metadata);
