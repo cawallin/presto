@@ -15,6 +15,7 @@ package com.facebook.presto.security;
 
 import com.facebook.presto.connector.ConnectorId;
 import com.facebook.presto.metadata.QualifiedObjectName;
+import com.facebook.presto.server.PluginManagerConfig;
 import com.facebook.presto.spi.CatalogSchemaName;
 import com.facebook.presto.spi.CatalogSchemaTableName;
 import com.facebook.presto.spi.PrestoException;
@@ -57,11 +58,12 @@ public class AccessControlManager
         implements AccessControl
 {
     private static final Logger log = Logger.get(AccessControlManager.class);
-    private static final File ACCESS_CONTROL_CONFIGURATION = new File("etc/access-control.properties");
     private static final String ACCESS_CONTROL_PROPERTY_NAME = "access-control.name";
+    private static final String ACCESS_CONTROL_CONFIG_FILE_NAME = "access-control.properties";
 
     public static final String ALLOW_ALL_ACCESS_CONTROL = "allow-all";
 
+    private final File accessControlConfiguration;
     private final TransactionManager transactionManager;
     private final Map<String, SystemAccessControlFactory> systemAccessControlFactories = new ConcurrentHashMap<>();
     private final Map<String, CatalogAccessControlEntry> catalogAccessControl = new ConcurrentHashMap<>();
@@ -75,9 +77,10 @@ public class AccessControlManager
     private final CounterStat authorizationFail = new CounterStat();
 
     @Inject
-    public AccessControlManager(TransactionManager transactionManager)
+    public AccessControlManager(TransactionManager transactionManager, PluginManagerConfig config)
     {
         this.transactionManager = requireNonNull(transactionManager, "transactionManager is null");
+        accessControlConfiguration = new File(config.getPluginConfigurationDir(), ACCESS_CONTROL_CONFIG_FILE_NAME);
         systemAccessControlFactories.put(ALLOW_ALL_ACCESS_CONTROL, new SystemAccessControlFactory()
         {
             @Override
@@ -119,12 +122,12 @@ public class AccessControlManager
     public void loadSystemAccessControl()
             throws Exception
     {
-        if (ACCESS_CONTROL_CONFIGURATION.exists()) {
-            Map<String, String> properties = new HashMap<>(loadProperties(ACCESS_CONTROL_CONFIGURATION));
+        if (accessControlConfiguration.exists()) {
+            Map<String, String> properties = new HashMap<>(loadProperties(accessControlConfiguration));
 
             String accessControlName = properties.remove(ACCESS_CONTROL_PROPERTY_NAME);
             checkArgument(!isNullOrEmpty(accessControlName),
-                    "Access control configuration %s does not contain %s", ACCESS_CONTROL_CONFIGURATION.getAbsoluteFile(), ACCESS_CONTROL_PROPERTY_NAME);
+                    "Access control configuration %s does not contain %s", accessControlConfiguration.getAbsoluteFile(), ACCESS_CONTROL_PROPERTY_NAME);
 
             setSystemAccessControl(accessControlName, properties);
         }

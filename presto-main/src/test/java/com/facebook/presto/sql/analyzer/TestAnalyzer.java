@@ -25,6 +25,7 @@ import com.facebook.presto.metadata.TablePropertyManager;
 import com.facebook.presto.metadata.TestingMetadata;
 import com.facebook.presto.metadata.ViewDefinition;
 import com.facebook.presto.security.AllowAllAccessControl;
+import com.facebook.presto.server.PluginManagerConfig;
 import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ConnectorMetadata;
 import com.facebook.presto.spi.ConnectorSplitManager;
@@ -1042,7 +1043,7 @@ public class TestAnalyzer
                 new SchemaPropertyManager(),
                 new TablePropertyManager(),
                 transactionManager,
-                new TestingAccessControlManager(transactionManager));
+                new TestingAccessControlManager(transactionManager, new PluginManagerConfig()));
         metadata.registerConnectorCatalog(TPCH_CONNECTOR_ID, TPCH_CATALOG);
         metadata.registerConnectorCatalog(SECOND_CONNECTOR_ID, SECOND_CATALOG);
         metadata.registerConnectorCatalog(THIRD_CONNECTOR_ID, THIRD_CATALOG);

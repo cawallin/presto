@@ -20,6 +20,7 @@ import com.facebook.presto.metadata.QualifiedObjectName;
 import com.facebook.presto.metadata.SchemaPropertyManager;
 import com.facebook.presto.metadata.SessionPropertyManager;
 import com.facebook.presto.metadata.TablePropertyManager;
+import com.facebook.presto.server.PluginManagerConfig;
 import com.facebook.presto.spi.CatalogSchemaTableName;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SchemaTableName;
@@ -63,7 +64,7 @@ public class TestAccessControlManager
     public void testInitializing()
             throws Exception
     {
-        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager());
+        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager(), new PluginManagerConfig());
         accessControlManager.checkCanSetUser(null, "foo");
     }
 
@@ -71,7 +72,7 @@ public class TestAccessControlManager
     public void testNoneSystemAccessControl()
             throws Exception
     {
-        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager());
+        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager(), new PluginManagerConfig());
         accessControlManager.setSystemAccessControl(ALLOW_ALL_ACCESS_CONTROL, ImmutableMap.<String, String>of());
         accessControlManager.checkCanSetUser(null, USER_NAME);
     }
@@ -80,7 +81,7 @@ public class TestAccessControlManager
     public void testSetAccessControl()
             throws Exception
     {
-        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager());
+        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager(), new PluginManagerConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -96,7 +97,7 @@ public class TestAccessControlManager
             throws Exception
     {
         TransactionManager transactionManager = createTestTransactionManager();
-        AccessControlManager accessControlManager = new AccessControlManager(transactionManager);
+        AccessControlManager accessControlManager = new AccessControlManager(transactionManager, new PluginManagerConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -113,7 +114,7 @@ public class TestAccessControlManager
             throws Exception
     {
         TransactionManager transactionManager = createTestTransactionManager();
-        AccessControlManager accessControlManager = new AccessControlManager(transactionManager);
+        AccessControlManager accessControlManager = new AccessControlManager(transactionManager, new PluginManagerConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -133,7 +134,7 @@ public class TestAccessControlManager
             throws Exception
     {
         TransactionManager transactionManager = createTestTransactionManager();
-        AccessControlManager accessControlManager = new AccessControlManager(transactionManager);
+        AccessControlManager accessControlManager = new AccessControlManager(transactionManager, new PluginManagerConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -153,7 +154,7 @@ public class TestAccessControlManager
             throws Exception
     {
         TransactionManager transactionManager = createTestTransactionManager();
-        AccessControlManager accessControlManager = new AccessControlManager(transactionManager);
+        AccessControlManager accessControlManager = new AccessControlManager(transactionManager, new PluginManagerConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -173,7 +174,7 @@ public class TestAccessControlManager
             throws Exception
     {
         TransactionManager transactionManager = createTestTransactionManager();
-        AccessControlManager accessControlManager = new AccessControlManager(transactionManager);
+        AccessControlManager accessControlManager = new AccessControlManager(transactionManager, new PluginManagerConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -193,7 +194,7 @@ public class TestAccessControlManager
     {
         TypeManager typeManager = new TypeRegistry();
         TransactionManager transactionManager = createTestTransactionManager();
-        AccessControlManager accessControlManager = new AccessControlManager(transactionManager);
+        AccessControlManager accessControlManager = new AccessControlManager(transactionManager, new PluginManagerConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
