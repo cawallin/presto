@@ -31,6 +31,7 @@ public class TestingEventListenerManager
 {
     private final AtomicReference<Optional<EventListener>> configuredEventListener = new AtomicReference<>(Optional.empty());
 
+    @Inject
     public TestingEventListenerManager(PluginManagerConfig config)
     {
         super(config);
