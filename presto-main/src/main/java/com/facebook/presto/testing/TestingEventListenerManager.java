@@ -23,6 +23,7 @@ import com.facebook.presto.spi.eventlistener.QueryCreatedEvent;
 import com.facebook.presto.spi.eventlistener.SplitCompletedEvent;
 import com.google.common.collect.ImmutableMap;
 
+import javax.inject.Inject;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
