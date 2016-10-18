@@ -29,6 +29,8 @@ import com.facebook.presto.operator.ExchangeClient;
 import com.facebook.presto.operator.ExchangeClientSupplier;
 import com.facebook.presto.spi.Node;
 import com.facebook.presto.spi.QueryId;
+import com.facebook.presto.spiller.LocalSpillManager;
+import com.facebook.presto.spiller.NodeSpillConfig;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import io.airlift.json.ObjectMapperProvider;
@@ -64,11 +66,13 @@ public class TestSqlTaskManager
     private final TaskExecutor taskExecutor;
     private final LocalMemoryManager localMemoryManager;
     private final MemoryRevokingScheduler memoryRevokingScheduler;
+    private final LocalSpillManager localSpillManager;
 
     public TestSqlTaskManager()
     {
         localMemoryManager = new LocalMemoryManager(new NodeMemoryConfig(), new ReservedSystemMemoryConfig());
         memoryRevokingScheduler = new MemoryRevokingScheduler(localMemoryManager);
+        localSpillManager = new LocalSpillManager(new NodeSpillConfig());
         taskExecutor = new TaskExecutor(8, 16);
         taskExecutor.start();
     }
@@ -280,7 +284,9 @@ public class TestSqlTaskManager
                 localMemoryManager,
                 memoryRevokingScheduler,
                 config,
-                new NodeMemoryConfig());
+                new NodeMemoryConfig(),
+                localSpillManager,
+                new NodeSpillConfig());
     }
 
     public static class MockExchangeClientSupplier
