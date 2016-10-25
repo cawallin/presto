@@ -25,6 +25,7 @@ import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.memory.MemoryPoolId;
 import com.facebook.presto.spi.type.Type;
+import com.facebook.presto.spiller.SpillSpaceTracker;
 import com.facebook.presto.sql.planner.plan.PlanNodeId;
 import com.facebook.presto.testing.LocalQueryRunner;
 import com.facebook.presto.testing.PageConsumerOperator.PageConsumerOutputFactory;
@@ -46,6 +47,7 @@ import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.testing.LocalQueryRunner.queryRunnerWithInitialTransaction;
 import static com.facebook.presto.testing.TestingTaskContext.createTaskContext;
 import static io.airlift.units.DataSize.Unit.BYTE;
+import static io.airlift.units.DataSize.Unit.GIGABYTE;
 import static io.airlift.units.DataSize.Unit.MEGABYTE;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
@@ -78,7 +80,8 @@ public class TestMemoryPools
         userPool = new MemoryPool(new MemoryPoolId("test"), TEN_MEGABYTES);
         systemPool = new MemoryPool(new MemoryPoolId("testSystem"), TEN_MEGABYTES);
         fakeQueryId = new QueryId("fake");
-        QueryContext queryContext = new QueryContext(new QueryId("query"), new DataSize(10, MEGABYTE), userPool, systemPool, localQueryRunner.getExecutor());
+        SpillSpaceTracker spillSpaceTracker = new SpillSpaceTracker(new DataSize(1, GIGABYTE));
+        QueryContext queryContext = new QueryContext(new QueryId("query"), new DataSize(10, MEGABYTE), userPool, systemPool, localQueryRunner.getExecutor(), new DataSize(10, MEGABYTE), spillSpaceTracker);
         taskContext = createTaskContext(queryContext, localQueryRunner.getExecutor(), session, ZERO_BYTES);
         drivers = driversSupplier.get();
     }

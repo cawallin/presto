@@ -225,6 +225,11 @@ public class DriverContext
         return future;
     }
 
+    public ListenableFuture<?> reserveSpill(long bytes)
+    {
+        return pipelineContext.reserveSpill(bytes);
+    }
+
     public boolean tryReserveMemory(long bytes)
     {
         if (pipelineContext.tryReserveMemory(bytes)) {
@@ -265,6 +270,15 @@ public class DriverContext
         checkArgument(bytes <= revocableSystemMemoryReservation.get(), "tried to free more revocable system memory than is reserved");
         pipelineContext.freeRevocableSystemMemory(bytes);
         revocableSystemMemoryReservation.getAndAdd(-bytes);
+    }
+
+    public void freeSpill(long bytes)
+    {
+        if (bytes == 0) {
+            return;
+        }
+        checkArgument(bytes >= 0, "bytes is negative");
+        pipelineContext.freeSpill(bytes);
     }
 
     @VisibleForTesting

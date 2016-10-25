@@ -29,6 +29,7 @@ import com.facebook.presto.operator.PipelineContext;
 import com.facebook.presto.operator.TaskContext;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.memory.MemoryPoolId;
+import com.facebook.presto.spiller.SpillSpaceTracker;
 import com.facebook.presto.sql.planner.LocalExecutionPlanner;
 import com.facebook.presto.sql.planner.plan.PlanNodeId;
 import com.facebook.presto.testing.TestingSession;
@@ -177,11 +178,12 @@ public class TestMemoryRevokingScheduler
     {
         TaskId taskId = new TaskId("query", 0, idGeneator.incrementAndGet());
         URI location = URI.create("fake://task/" + taskId);
+        SpillSpaceTracker spillSpaceTracker = new SpillSpaceTracker(new DataSize(1, GIGABYTE));
 
         return new SqlTask(
                 taskId,
                 location,
-                new QueryContext(new QueryId("query"), new DataSize(1, MEGABYTE), new MemoryPool(new MemoryPoolId("test"), new DataSize(1, GIGABYTE)), systemMemoryPool, executor),
+                new QueryContext(new QueryId("query"), new DataSize(1, MEGABYTE), new MemoryPool(new MemoryPoolId("test"), new DataSize(1, GIGABYTE)), systemMemoryPool, executor, new DataSize(1, GIGABYTE), spillSpaceTracker),
                 sqlTaskExecutionFactory,
                 executor,
                 Functions.<SqlTask>identity(),
