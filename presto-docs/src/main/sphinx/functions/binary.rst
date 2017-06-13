@@ -34,6 +34,22 @@ Binary Functions
 
     Decodes binary data from the hex encoded ``string``.
 
+.. function:: to_big_endian_64(bigint) -> varbinary
+
+    Encodes ``bigint`` in a 64-bit 2's complement big endian format.
+
+.. function:: from_big_endian_64(binary) -> bigint
+
+    Decodes ``bigint`` value from a 64-bit 2's complement big endian ``binary``.
+
+.. function:: to_ieee754_32(real) -> varbinary
+
+    Encodes ``real`` in a 32-bit big-endian binary according to IEEE 754 single-precision floating-point format.
+
+.. function:: to_ieee754_64(double) -> varbinary
+
+    Encodes ``double`` in a 64-bit big-endian binary according to IEEE 754 double-precision floating-point format.
+
 .. function:: md5(binary) -> varbinary
 
     Computes the md5 hash of ``binary``.
@@ -49,3 +65,7 @@ Binary Functions
 .. function:: sha512(binary) -> varbinary
 
     Computes the sha512 hash of ``binary``.
+
+.. function:: xxhash64(binary) -> varbinary
+
+    Computes the xxhash64 hash of ``binary``.

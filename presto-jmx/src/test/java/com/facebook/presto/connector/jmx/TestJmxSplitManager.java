@@ -82,8 +82,8 @@ public class TestJmxSplitManager
                                 }
                             });
 
-    private final JmxColumnHandle columnHandle = new JmxColumnHandle("test", "node", createUnboundedVarcharType());
-    private final JmxTableHandle tableHandle = new JmxTableHandle("test", "objectName", ImmutableList.of(columnHandle), true);
+    private final JmxColumnHandle columnHandle = new JmxColumnHandle("node", createUnboundedVarcharType());
+    private final JmxTableHandle tableHandle = new JmxTableHandle("objectName", ImmutableList.of(columnHandle), true);
 
     private final JmxSplitManager splitManager = jmxConnector.getSplitManager();
     private final JmxMetadata metadata = jmxConnector.getMetadata(new ConnectorTransactionHandle() {});
@@ -104,7 +104,7 @@ public class TestJmxSplitManager
             TupleDomain<ColumnHandle> nodeTupleDomain = TupleDomain.fromFixedValues(ImmutableMap.of(columnHandle, NullableValue.of(createUnboundedVarcharType(), utf8Slice(nodeIdentifier))));
             ConnectorTableLayoutHandle layout = new JmxTableLayoutHandle(tableHandle, nodeTupleDomain);
 
-            ConnectorSplitSource splitSource = splitManager.getSplits(JmxTransactionHandle.INSTANCE, SESSION, layout);
+            ConnectorSplitSource splitSource = splitManager.getSplits(JmxTransactionHandle.INSTANCE, SESSION, layout, ImmutableList.of());
             List<ConnectorSplit> allSplits = getAllSplits(splitSource);
 
             assertEquals(allSplits.size(), 1);
@@ -118,7 +118,7 @@ public class TestJmxSplitManager
             throws Exception
     {
         ConnectorTableLayoutHandle layout = new JmxTableLayoutHandle(tableHandle, TupleDomain.all());
-        ConnectorSplitSource splitSource = splitManager.getSplits(JmxTransactionHandle.INSTANCE, SESSION, layout);
+        ConnectorSplitSource splitSource = splitManager.getSplits(JmxTransactionHandle.INSTANCE, SESSION, layout, ImmutableList.of());
         List<ConnectorSplit> allSplits = getAllSplits(splitSource);
         assertEquals(allSplits.size(), nodes.size());
 
@@ -195,7 +195,7 @@ public class TestJmxSplitManager
         List<ColumnHandle> columnHandles = ImmutableList.copyOf(metadata.getColumnHandles(SESSION, tableHandle).values());
 
         ConnectorTableLayoutHandle layout = new JmxTableLayoutHandle(tableHandle, TupleDomain.all());
-        ConnectorSplitSource splitSource = splitManager.getSplits(JmxTransactionHandle.INSTANCE, SESSION, layout);
+        ConnectorSplitSource splitSource = splitManager.getSplits(JmxTransactionHandle.INSTANCE, SESSION, layout, columnHandles);
         List<ConnectorSplit> allSplits = getAllSplits(splitSource);
         assertEquals(allSplits.size(), nodes.size());
         ConnectorSplit split = allSplits.get(0);

@@ -14,6 +14,7 @@
 package com.facebook.presto.sql.planner.assertions;
 
 import com.facebook.presto.Session;
+import com.facebook.presto.cost.PlanNodeCost;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.TableMetadata;
 import com.facebook.presto.spi.ColumnHandle;
@@ -26,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
+import static com.google.common.base.Preconditions.checkState;
 import static java.util.Objects.requireNonNull;
 
 final class TableScanMatcher
@@ -33,29 +35,47 @@ final class TableScanMatcher
 {
     private final String expectedTableName;
     private final Optional<Map<String, Domain>> expectedConstraint;
+    private final Optional<TableLayoutHandleMatcher> expectedTableLayout;
 
     TableScanMatcher(String expectedTableName)
     {
         this.expectedTableName = requireNonNull(expectedTableName, "expectedTableName is null");
         expectedConstraint = Optional.empty();
+        expectedTableLayout = Optional.empty();
     }
 
     public TableScanMatcher(String expectedTableName, Map<String, Domain> expectedConstraint)
     {
         this.expectedTableName = requireNonNull(expectedTableName, "expectedTableName is null");
         this.expectedConstraint = Optional.of(requireNonNull(expectedConstraint, "expectedConstraint is null"));
+        expectedTableLayout = Optional.empty();
+    }
+
+    public TableScanMatcher(String expectedTableName, Map<String, Domain> expectedConstraint, TableLayoutHandleMatcher expectedTableLayout)
+    {
+        this.expectedTableName = requireNonNull(expectedTableName, "expectedTableName is null");
+        this.expectedConstraint = Optional.of(requireNonNull(expectedConstraint, "expectedConstraint is null"));
+        this.expectedTableLayout = Optional.of(expectedTableLayout);
     }
 
     @Override
-    public boolean matches(PlanNode node, Session session, Metadata metadata, ExpressionAliases expressionAliases)
+    public boolean shapeMatches(PlanNode node)
     {
-        if (node instanceof TableScanNode) {
-            TableScanNode tableScanNode = (TableScanNode) node;
-            TableMetadata tableMetadata = metadata.getTableMetadata(session, tableScanNode.getTable());
-            String actualTableName = tableMetadata.getTable().getTableName();
-            return expectedTableName.equalsIgnoreCase(actualTableName) && domainMatches(tableScanNode, session, metadata);
-        }
-        return false;
+        return node instanceof TableScanNode;
+    }
+
+    @Override
+    public MatchResult detailMatches(PlanNode node, PlanNodeCost cost, Session session, Metadata metadata, SymbolAliases symbolAliases)
+    {
+        checkState(shapeMatches(node), "Plan testing framework error: shapeMatches returned false in detailMatches in %s", this.getClass().getName());
+
+        TableScanNode tableScanNode = (TableScanNode) node;
+        TableMetadata tableMetadata = metadata.getTableMetadata(session, tableScanNode.getTable());
+        String actualTableName = tableMetadata.getTable().getTableName();
+        return new MatchResult(
+                expectedTableName.equalsIgnoreCase(actualTableName) &&
+                        domainMatches(tableScanNode, session, metadata) &&
+                        tableLayoutMatches(tableScanNode));
     }
 
     private boolean domainMatches(TableScanNode tableScanNode, Session session, Metadata metadata)
@@ -86,6 +106,15 @@ final class TableScanMatcher
         return true;
     }
 
+    private boolean tableLayoutMatches(TableScanNode tableScanNode)
+    {
+        if (expectedTableLayout.isPresent()) {
+            return expectedTableLayout.get().matches(tableScanNode.getLayout());
+        }
+
+        return true;
+    }
+
     @Override
     public String toString()
     {
@@ -93,6 +122,7 @@ final class TableScanMatcher
                 .omitNullValues()
                 .add("expectedTableName", expectedTableName)
                 .add("expectedConstraint", expectedConstraint.orElse(null))
+                .add("expectedTableLayout", expectedTableLayout.orElse(null))
                 .toString();
     }
 }

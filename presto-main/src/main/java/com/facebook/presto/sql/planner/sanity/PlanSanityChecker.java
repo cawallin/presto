@@ -33,7 +33,10 @@ public final class PlanSanityChecker
             new ValidateDependenciesChecker(),
             new TypeValidator(),
             new NoSubqueryExpressionLeftChecker(),
-            new NoApplyNodeLeftChecker());
+            new NoDuplicatePlanNodeIdsChecker(),
+            new NoApplyNodeLeftChecker(),
+            new VerifyNoFilteredAggregations(),
+            new VerifyOnlyOneOutputNode());
 
     private PlanSanityChecker() {}
 

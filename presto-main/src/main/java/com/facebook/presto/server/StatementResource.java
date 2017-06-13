@@ -22,7 +22,6 @@ import com.facebook.presto.client.QueryError;
 import com.facebook.presto.client.QueryResults;
 import com.facebook.presto.client.StageStats;
 import com.facebook.presto.client.StatementStats;
-import com.facebook.presto.execution.QueryIdGenerator;
 import com.facebook.presto.execution.QueryInfo;
 import com.facebook.presto.execution.QueryManager;
 import com.facebook.presto.execution.QueryState;
@@ -30,22 +29,24 @@ import com.facebook.presto.execution.QueryStats;
 import com.facebook.presto.execution.StageInfo;
 import com.facebook.presto.execution.StageState;
 import com.facebook.presto.execution.TaskInfo;
-import com.facebook.presto.execution.buffer.BufferInfo;
 import com.facebook.presto.execution.buffer.OutputBufferInfo;
+import com.facebook.presto.execution.buffer.PagesSerde;
+import com.facebook.presto.execution.buffer.PagesSerdeFactory;
+import com.facebook.presto.execution.buffer.SerializedPage;
 import com.facebook.presto.metadata.SessionPropertyManager;
 import com.facebook.presto.operator.ExchangeClient;
 import com.facebook.presto.operator.ExchangeClientSupplier;
-import com.facebook.presto.security.AccessControl;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.ErrorCode;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.BlockEncodingSerde;
+import com.facebook.presto.spi.security.SelectedRole;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeSignature;
 import com.facebook.presto.transaction.TransactionId;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -76,7 +77,9 @@ import javax.ws.rs.core.Response.ResponseBuilder;
 import javax.ws.rs.core.Response.Status;
 import javax.ws.rs.core.UriInfo;
 
+import java.io.UnsupportedEncodingException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -91,15 +94,14 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.facebook.presto.SystemSessionProperties.isExchangeCompressionEnabled;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_ADDED_PREPARE;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_CLEAR_SESSION;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_CLEAR_TRANSACTION_ID;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_DEALLOCATED_PREPARE;
+import static com.facebook.presto.client.PrestoHeaders.PRESTO_SET_ROLE;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_SET_SESSION;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_STARTED_TRANSACTION_ID;
-import static com.facebook.presto.server.ResourceUtil.assertRequest;
-import static com.facebook.presto.server.ResourceUtil.createSessionForRequest;
-import static com.facebook.presto.server.ResourceUtil.urlEncode;
 import static com.facebook.presto.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static com.facebook.presto.util.Failures.toFailure;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -123,10 +125,9 @@ public class StatementResource
     private static final long DESIRED_RESULT_BYTES = new DataSize(1, MEGABYTE).toBytes();
 
     private final QueryManager queryManager;
-    private final AccessControl accessControl;
     private final SessionPropertyManager sessionPropertyManager;
     private final ExchangeClientSupplier exchangeClientSupplier;
-    private final QueryIdGenerator queryIdGenerator;
+    private final BlockEncodingSerde blockEncodingSerde;
 
     private final ConcurrentMap<QueryId, Query> queries = new ConcurrentHashMap<>();
     private final ScheduledExecutorService queryPurger = newSingleThreadScheduledExecutor(threadsNamed("query-purger"));
@@ -134,16 +135,14 @@ public class StatementResource
     @Inject
     public StatementResource(
             QueryManager queryManager,
-            AccessControl accessControl,
             SessionPropertyManager sessionPropertyManager,
             ExchangeClientSupplier exchangeClientSupplier,
-            QueryIdGenerator queryIdGenerator)
+            BlockEncodingSerde blockEncodingSerde)
     {
         this.queryManager = requireNonNull(queryManager, "queryManager is null");
-        this.accessControl = requireNonNull(accessControl, "accessControl is null");
         this.sessionPropertyManager = requireNonNull(sessionPropertyManager, "sessionPropertyManager is null");
         this.exchangeClientSupplier = requireNonNull(exchangeClientSupplier, "exchangeClientSupplier is null");
-        this.queryIdGenerator = requireNonNull(queryIdGenerator, "queryIdGenerator is null");
+        this.blockEncodingSerde = requireNonNull(blockEncodingSerde, "blockEncodingSerde is null");
 
         queryPurger.scheduleWithFixedDelay(new PurgeQueriesRunnable(queries, queryManager), 200, 200, MILLISECONDS);
     }
@@ -162,12 +161,24 @@ public class StatementResource
             @Context UriInfo uriInfo)
             throws InterruptedException
     {
-        assertRequest(!isNullOrEmpty(statement), "SQL statement is empty");
+        if (isNullOrEmpty(statement)) {
+            throw new WebApplicationException(Response
+                    .status(Status.BAD_REQUEST)
+                    .type(MediaType.TEXT_PLAIN)
+                    .entity("SQL statement is empty")
+                    .build());
+        }
 
-        Session session = createSessionForRequest(servletRequest, accessControl, sessionPropertyManager, queryIdGenerator.createNextQueryId());
+        SessionSupplier sessionSupplier = new HttpRequestSessionFactory(servletRequest);
 
         ExchangeClient exchangeClient = exchangeClientSupplier.get(deltaMemoryInBytes -> { });
-        Query query = new Query(session, statement, queryManager, exchangeClient);
+        Query query = new Query(
+                sessionSupplier,
+                statement,
+                queryManager,
+                sessionPropertyManager,
+                exchangeClient,
+                blockEncodingSerde);
         queries.put(query.getQueryId(), query);
 
         return getQueryResults(query, Optional.empty(), uriInfo, new Duration(1, MILLISECONDS));
@@ -213,6 +224,10 @@ public class StatementResource
         query.getResetSessionProperties()
                 .forEach(name -> response.header(PRESTO_CLEAR_SESSION, name));
 
+        // add set roles
+        query.getSetRoles().entrySet()
+                .forEach(entry -> response.header(PRESTO_SET_ROLE, entry.getKey() + '=' + urlEncode(entry.getValue().toString())));
+
         // add added prepare statements
         for (Entry<String, String> entry : query.getAddedPreparedStatements().entrySet()) {
             String encodedKey = urlEncode(entry.getKey());
@@ -251,12 +266,23 @@ public class StatementResource
         return Response.noContent().build();
     }
 
+    private static String urlEncode(String value)
+    {
+        try {
+            return URLEncoder.encode(value, "UTF-8");
+        }
+        catch (UnsupportedEncodingException e) {
+            throw new AssertionError(e);
+        }
+    }
+
     @ThreadSafe
     public static class Query
     {
         private final QueryManager queryManager;
         private final QueryId queryId;
         private final ExchangeClient exchangeClient;
+        private final PagesSerde serde;
 
         private final AtomicLong resultId = new AtomicLong();
         private final Session session;
@@ -277,6 +303,9 @@ public class StatementResource
         private Set<String> resetSessionProperties;
 
         @GuardedBy("this")
+        private Map<String, SelectedRole> setRoles;
+
+        @GuardedBy("this")
         private Map<String, String> addedPreparedStatements;
 
         @GuardedBy("this")
@@ -291,22 +320,27 @@ public class StatementResource
         @GuardedBy("this")
         private Long updateCount;
 
-        public Query(Session session,
+        public Query(
+                SessionSupplier sessionSupplier,
                 String query,
                 QueryManager queryManager,
-                ExchangeClient exchangeClient)
+                SessionPropertyManager sessionPropertyManager,
+                ExchangeClient exchangeClient,
+                BlockEncodingSerde blockEncodingSerde)
         {
-            requireNonNull(session, "session is null");
+            requireNonNull(sessionSupplier, "sessionFactory is null");
             requireNonNull(query, "query is null");
             requireNonNull(queryManager, "queryManager is null");
             requireNonNull(exchangeClient, "exchangeClient is null");
 
-            this.session = session;
             this.queryManager = queryManager;
 
-            QueryInfo queryInfo = queryManager.createQuery(session, query);
+            QueryInfo queryInfo = queryManager.createQuery(sessionSupplier, query);
             queryId = queryInfo.getQueryId();
+            session = queryInfo.getSession().toSession(sessionPropertyManager);
             this.exchangeClient = exchangeClient;
+            requireNonNull(blockEncodingSerde, "serde is null");
+            this.serde = new PagesSerdeFactory(blockEncodingSerde, isExchangeCompressionEnabled(session)).createPagesSerde();
         }
 
         public void cancel()
@@ -333,6 +367,11 @@ public class StatementResource
         public synchronized Set<String> getResetSessionProperties()
         {
             return resetSessionProperties;
+        }
+
+        public synchronized Map<String, SelectedRole> getSetRoles()
+        {
+            return setRoles;
         }
 
         public synchronized Map<String, String> getAddedPreparedStatements()
@@ -435,6 +474,9 @@ public class StatementResource
             setSessionProperties = queryInfo.getSetSessionProperties();
             resetSessionProperties = queryInfo.getResetSessionProperties();
 
+            // update setRoles
+            setRoles = queryInfo.getSetRoles();
+
             // update preparedStatements
             addedPreparedStatements = queryInfo.getAddedPreparedStatements();
             deallocatedPreparedStatements = queryInfo.getDeallocatedPreparedStatements();
@@ -496,10 +538,12 @@ public class StatementResource
             // wait up to max wait for data to arrive; then try to return at least DESIRED_RESULT_BYTES
             long bytes = 0;
             while (bytes < DESIRED_RESULT_BYTES) {
-                Page page = exchangeClient.getNextPage(maxWait);
-                if (page == null) {
+                SerializedPage serializedPage = exchangeClient.getNextPage(maxWait);
+                if (serializedPage == null) {
                     break;
                 }
+
+                Page page = serde.deserialize(serializedPage);
                 bytes += page.getSizeInBytes();
                 pages.add(new RowIterable(session.toConnectorSession(), types, page));
 
@@ -526,17 +570,11 @@ public class StatementResource
             if (!outputStage.getState().isDone()) {
                 for (TaskInfo taskInfo : outputStage.getTasks()) {
                     OutputBufferInfo outputBuffers = taskInfo.getOutputBuffers();
-                    List<BufferInfo> buffers = outputBuffers.getBuffers();
-                    if (buffers.isEmpty() || outputBuffers.getState().canAddBuffers()) {
-                        // output buffer has not been created yet
+                    if (outputBuffers.getState().canAddBuffers()) {
+                        // output buffer are still being created
                         continue;
                     }
-                    Preconditions.checkState(buffers.size() == 1,
-                            "Expected a single output buffer for task %s, but found %s",
-                            taskInfo.getTaskStatus().getTaskId(),
-                            buffers);
-
-                    OutputBufferId bufferId = Iterables.getOnlyElement(buffers).getBufferId();
+                    OutputBufferId bufferId = new OutputBufferId(0);
                     URI uri = uriBuilderFrom(taskInfo.getTaskStatus().getSelf()).appendPath("results").appendPath(bufferId.toString()).build();
                     exchangeClient.addLocation(uri);
                 }

@@ -17,19 +17,24 @@ import com.facebook.presto.Session;
 import com.facebook.presto.connector.ConnectorId;
 import com.facebook.presto.spi.CatalogSchemaName;
 import com.facebook.presto.spi.ColumnHandle;
+import com.facebook.presto.spi.ColumnIdentity;
 import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ConnectorTableMetadata;
 import com.facebook.presto.spi.Constraint;
+import com.facebook.presto.spi.TableIdentity;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
+import com.facebook.presto.spi.connector.ConnectorOutputMetadata;
 import com.facebook.presto.spi.predicate.TupleDomain;
+import com.facebook.presto.spi.security.GrantInfo;
+import com.facebook.presto.spi.security.PrestoPrincipal;
 import com.facebook.presto.spi.security.Privilege;
+import com.facebook.presto.spi.security.RoleGrant;
+import com.facebook.presto.spi.statistics.TableStatistics;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.TypeSignature;
 import com.facebook.presto.sql.tree.QualifiedName;
 import io.airlift.slice.Slice;
-
-import javax.validation.constraints.NotNull;
 
 import java.util.Collection;
 import java.util.List;
@@ -46,29 +51,23 @@ public interface Metadata
 
     boolean isAggregationFunction(QualifiedName name);
 
-    @NotNull
     List<SqlFunction> listFunctions();
 
     void addFunctions(List<? extends SqlFunction> functions);
 
     boolean schemaExists(Session session, CatalogSchemaName schema);
 
-    @NotNull
     List<String> listSchemaNames(Session session, String catalogName);
 
     /**
      * Returns a table handle for the specified table name.
      */
-    @NotNull
     Optional<TableHandle> getTableHandle(Session session, QualifiedObjectName tableName);
 
-    @NotNull
     List<TableLayoutResult> getLayouts(Session session, TableHandle tableHandle, Constraint<ColumnHandle> constraint, Optional<Set<ColumnHandle>> desiredColumns);
 
-    @NotNull
     TableLayout getLayout(Session session, TableLayoutHandle handle);
 
-    @NotNull
     Optional<Object> getInfo(Session session, TableLayoutHandle handle);
 
     /**
@@ -76,35 +75,23 @@ public interface Metadata
      *
      * @throws RuntimeException if table handle is no longer valid
      */
-    @NotNull
     TableMetadata getTableMetadata(Session session, TableHandle tableHandle);
+
+    /**
+     * Return statistics for specified table for given filtering contraint.
+     */
+    TableStatistics getTableStatistics(Session session, TableHandle tableHandle, Constraint<ColumnHandle> constraint);
 
     /**
      * Get the names that match the specified table prefix (never null).
      */
-    @NotNull
     List<QualifiedObjectName> listTables(Session session, QualifiedTablePrefix prefix);
-
-    /**
-     * Returns the handle for the sample weight column.
-     *
-     * @throws RuntimeException if the table handle is no longer valid
-     */
-    @NotNull
-    Optional<ColumnHandle> getSampleWeightColumnHandle(Session session, TableHandle tableHandle);
-
-    /**
-     * Returns true iff this catalog supports creation of sampled tables
-     *
-     */
-    boolean canCreateSampledTables(Session session, String catalogName);
 
     /**
      * Gets all of the columns on the specified table, or an empty map if the columns can not be enumerated.
      *
      * @throws RuntimeException if table handle is no longer valid
      */
-    @NotNull
     Map<String, ColumnHandle> getColumnHandles(Session session, TableHandle tableHandle);
 
     /**
@@ -112,13 +99,11 @@ public interface Metadata
      *
      * @throws RuntimeException if table or column handles are no longer valid
      */
-    @NotNull
     ColumnMetadata getColumnMetadata(Session session, TableHandle tableHandle, ColumnHandle columnHandle);
 
     /**
      * Gets the metadata for all columns that match the specified table prefix.
      */
-    @NotNull
     Map<QualifiedObjectName, List<ColumnMetadata>> listTableColumns(Session session, QualifiedTablePrefix prefix);
 
     /**
@@ -139,7 +124,6 @@ public interface Metadata
     /**
      * Creates a table using the specified table metadata.
      */
-    @NotNull
     void createTable(Session session, String catalogName, ConnectorTableMetadata tableMetadata);
 
     /**
@@ -164,6 +148,26 @@ public interface Metadata
      */
     void dropTable(Session session, TableHandle tableHandle);
 
+    /**
+     * Gets the TableIdentity for the specified table.
+     */
+    TableIdentity getTableIdentity(Session session, TableHandle tableHandle);
+
+    /**
+     * Deserialize the bytes to TableIdentity
+     */
+    TableIdentity deserializeTableIdentity(Session session, String catalogName, byte[] bytes);
+
+    /**
+     * Gets the ColumnIdentity for the specified column.
+     */
+    ColumnIdentity getColumnIdentity(Session session, TableHandle tableHandle, ColumnHandle columnHandle);
+
+    /**
+     * Deserialize the bytes to ColumnIdentity
+     */
+    ColumnIdentity deserializeColumnIdentity(Session session, String catalogName, byte[] bytes);
+
     Optional<NewTableLayout> getNewTableLayout(Session session, String catalogName, ConnectorTableMetadata tableMetadata);
 
     /**
@@ -174,9 +178,20 @@ public interface Metadata
     /**
      * Finish a table creation with data after the data is written.
      */
-    void finishCreateTable(Session session, OutputTableHandle tableHandle, Collection<Slice> fragments);
+    Optional<ConnectorOutputMetadata> finishCreateTable(Session session, OutputTableHandle tableHandle, Collection<Slice> fragments);
 
     Optional<NewTableLayout> getInsertLayout(Session session, TableHandle target);
+
+    /**
+     * Start a SELECT/UPDATE/INSERT/DELETE query
+     */
+    void beginQuery(Session session, Set<ConnectorId> connectors);
+
+    /**
+     * Cleanup after a query. This is the very last notification after the query finishes, regardless if it succeeds or fails.
+     * An exception thrown in this method will not affect the result of the query.
+     */
+    void cleanupQuery(Session session);
 
     /**
      * Begin insert query
@@ -186,7 +201,7 @@ public interface Metadata
     /**
      * Finish insert query
      */
-    void finishInsert(Session session, InsertTableHandle tableHandle, Collection<Slice> fragments);
+    Optional<ConnectorOutputMetadata> finishInsert(Session session, InsertTableHandle tableHandle, Collection<Slice> fragments);
 
     /**
      * Get the row ID column handle used with UpdatablePageSource.
@@ -216,29 +231,30 @@ public interface Metadata
     void finishDelete(Session session, TableHandle tableHandle, Collection<Slice> fragments);
 
     /**
+     * Returns a connector id for the specified catalog name.
+     */
+    Optional<ConnectorId> getCatalogHandle(Session session, String catalogName);
+
+    /**
      * Gets all the loaded catalogs
      *
      * @return Map of catalog name to connector id
      */
-    @NotNull
-    Map<String, ConnectorId> getCatalogNames();
+    Map<String, ConnectorId> getCatalogNames(Session session);
 
     /**
      * Get the names that match the specified table prefix (never null).
      */
-    @NotNull
     List<QualifiedObjectName> listViews(Session session, QualifiedTablePrefix prefix);
 
     /**
      * Get the view definitions that match the specified table prefix (never null).
      */
-    @NotNull
     Map<QualifiedObjectName, ViewDefinition> getViews(Session session, QualifiedTablePrefix prefix);
 
     /**
      * Returns the view definition for the specified view name.
      */
-    @NotNull
     Optional<ViewDefinition> getView(Session session, QualifiedObjectName viewName);
 
     /**
@@ -257,14 +273,65 @@ public interface Metadata
     Optional<ResolvedIndex> resolveIndex(Session session, TableHandle tableHandle, Set<ColumnHandle> indexableColumns, Set<ColumnHandle> outputColumns, TupleDomain<ColumnHandle> tupleDomain);
 
     /**
+     * Creates the specified role in the specified connector.
+     *
+     * @param grantor represents the principal specified by WITH ADMIN statement
+     */
+    void createRole(Session session, String role, Optional<PrestoPrincipal> grantor, String catalog);
+
+    /**
+     * Drops the specified role in the specified catalog.
+     */
+    void dropRole(Session session, String role, String catalog);
+
+    /**
+     * List available roles in specified catalog.
+     */
+    Set<String> listRoles(Session session, String catalog);
+
+    /**
+     * List roles grants in the specified catalog for a given principal, not recursively.
+     */
+    Set<RoleGrant> listRoleGrants(Session session, String catalog, PrestoPrincipal principal);
+
+    /**
+     * Grants the specified roles to the specified grantees in the specified catalog
+     *
+     * @param grantor represents the principal specified by GRANTED BY statement
+     */
+    void grantRoles(Session session, Set<String> roles, Set<PrestoPrincipal> grantees, boolean withAdminOption, Optional<PrestoPrincipal> grantor, String catalog);
+
+    /**
+     * Revokes the specified roles from the specified grantees in the specified catalog
+     *
+     * @param grantor represents the principal specified by GRANTED BY statement
+     */
+    void revokeRoles(Session session, Set<String> roles, Set<PrestoPrincipal> grantees, boolean adminOptionFor, Optional<PrestoPrincipal> grantor, String catalog);
+
+    /**
+     * List applicable roles, including the transitive grants, for the specified principal
+     */
+    Set<RoleGrant> listApplicableRoles(Session session, PrestoPrincipal principal, String catalog);
+
+    /**
+     * List applicable roles, including the transitive grants, in given session
+     */
+    Set<String> listEnabledRoles(Session session, String catalog);
+
+    /**
      * Grants the specified privilege to the specified user on the specified table
      */
-    void grantTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, String grantee, boolean grantOption);
+    void grantTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, PrestoPrincipal grantee, boolean grantOption);
 
     /**
      * Revokes the specified privilege on the specified table from the specified user
      */
-    void revokeTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, String grantee, boolean grantOption);
+    void revokeTablePrivileges(Session session, QualifiedObjectName tableName, Set<Privilege> privileges, PrestoPrincipal grantee, boolean grantOption);
+
+    /**
+     * Gets the privileges for the specified table available to the given grantee considering the selected session role
+     */
+    List<GrantInfo> listTablePrivileges(Session session, QualifiedTablePrefix prefix);
 
     FunctionRegistry getFunctionRegistry();
 

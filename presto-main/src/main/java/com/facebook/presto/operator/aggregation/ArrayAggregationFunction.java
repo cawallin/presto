@@ -42,8 +42,8 @@ import static com.facebook.presto.operator.aggregation.AggregationMetadata.Param
 import static com.facebook.presto.operator.aggregation.AggregationMetadata.ParameterMetadata.ParameterType.STATE;
 import static com.facebook.presto.operator.aggregation.AggregationUtils.generateAggregationName;
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.facebook.presto.util.Reflection.methodHandle;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 
 public class ArrayAggregationFunction
         extends SqlAggregationFunction
@@ -104,11 +104,10 @@ public class ArrayAggregationFunction
                 stateInterface,
                 stateSerializer,
                 stateFactory,
-                outputType,
-                false);
+                outputType);
 
-        GenericAccumulatorFactoryBinder factory = new AccumulatorCompiler().generateAccumulatorFactoryBinder(metadata, classLoader);
-        return new InternalAggregationFunction(NAME, inputTypes, intermediateType, outputType, true, false, factory);
+        GenericAccumulatorFactoryBinder factory = AccumulatorCompiler.generateAccumulatorFactoryBinder(metadata, classLoader);
+        return new InternalAggregationFunction(NAME, inputTypes, intermediateType, outputType, true, factory);
     }
 
     private static List<ParameterMetadata> createInputParameterMetadata(Type value, boolean legacyArrayAgg)

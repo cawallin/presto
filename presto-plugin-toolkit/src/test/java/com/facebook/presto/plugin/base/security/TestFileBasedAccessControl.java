@@ -17,7 +17,7 @@ import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.connector.ConnectorAccessControl;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
 import com.facebook.presto.spi.security.AccessDeniedException;
-import com.facebook.presto.spi.security.Identity;
+import com.facebook.presto.spi.security.ConnectorIdentity;
 import org.testng.annotations.Test;
 
 import java.io.IOException;
@@ -35,17 +35,17 @@ public class TestFileBasedAccessControl
             throws IOException
     {
         ConnectorAccessControl accessControl = createAccessControl("schema.json");
-        accessControl.checkCanCreateTable(TRANSACTION_HANDLE, user("admin"), SchemaTableName.valueOf("test.test"));
-        accessControl.checkCanCreateTable(TRANSACTION_HANDLE, user("bob"), SchemaTableName.valueOf("bob.test"));
+        accessControl.checkCanCreateTable(TRANSACTION_HANDLE, user("admin"), new SchemaTableName("test", "test"));
+        accessControl.checkCanCreateTable(TRANSACTION_HANDLE, user("bob"), new SchemaTableName("bob", "test"));
         try {
-            accessControl.checkCanCreateTable(TRANSACTION_HANDLE, user("bob"), SchemaTableName.valueOf("test.test"));
+            accessControl.checkCanCreateTable(TRANSACTION_HANDLE, user("bob"), new SchemaTableName("test", "test"));
             fail();
         }
         catch (AccessDeniedException e) {
             // expected
         }
         try {
-            accessControl.checkCanCreateTable(TRANSACTION_HANDLE, user("admin"), SchemaTableName.valueOf("secret.test"));
+            accessControl.checkCanCreateTable(TRANSACTION_HANDLE, user("admin"), new SchemaTableName("secret", "test"));
             fail();
         }
         catch (AccessDeniedException e) {
@@ -58,36 +58,36 @@ public class TestFileBasedAccessControl
             throws IOException
     {
         ConnectorAccessControl accessControl = createAccessControl("table.json");
-        accessControl.checkCanSelectFromTable(TRANSACTION_HANDLE, user("alice"), SchemaTableName.valueOf("test.test"));
-        accessControl.checkCanSelectFromTable(TRANSACTION_HANDLE, user("alice"), SchemaTableName.valueOf("bobschema.bobtable"));
-        accessControl.checkCanSelectFromTable(TRANSACTION_HANDLE, user("bob"), SchemaTableName.valueOf("bobschema.bobtable"));
-        accessControl.checkCanInsertIntoTable(TRANSACTION_HANDLE, user("bob"), SchemaTableName.valueOf("bobschema.bobtable"));
-        accessControl.checkCanDeleteFromTable(TRANSACTION_HANDLE, user("bob"), SchemaTableName.valueOf("bobschema.bobtable"));
-        accessControl.checkCanCreateViewWithSelectFromTable(TRANSACTION_HANDLE, user("bob"), SchemaTableName.valueOf("bobschema.bobtable"));
-        accessControl.checkCanDropTable(TRANSACTION_HANDLE, user("admin"), SchemaTableName.valueOf("bobschema.bobtable"));
+        accessControl.checkCanSelectFromTable(TRANSACTION_HANDLE, user("alice"), new SchemaTableName("test", "test"));
+        accessControl.checkCanSelectFromTable(TRANSACTION_HANDLE, user("alice"), new SchemaTableName("bobschema", "bobtable"));
+        accessControl.checkCanSelectFromTable(TRANSACTION_HANDLE, user("bob"), new SchemaTableName("bobschema", "bobtable"));
+        accessControl.checkCanInsertIntoTable(TRANSACTION_HANDLE, user("bob"), new SchemaTableName("bobschema", "bobtable"));
+        accessControl.checkCanDeleteFromTable(TRANSACTION_HANDLE, user("bob"), new SchemaTableName("bobschema", "bobtable"));
+        accessControl.checkCanCreateViewWithSelectFromTable(TRANSACTION_HANDLE, user("bob"), new SchemaTableName("bobschema", "bobtable"));
+        accessControl.checkCanDropTable(TRANSACTION_HANDLE, user("admin"), new SchemaTableName("bobschema", "bobtable"));
         try {
-            accessControl.checkCanInsertIntoTable(TRANSACTION_HANDLE, user("alice"), SchemaTableName.valueOf("bobschema.bobtable"));
+            accessControl.checkCanInsertIntoTable(TRANSACTION_HANDLE, user("alice"), new SchemaTableName("bobschema", "bobtable"));
             fail();
         }
         catch (AccessDeniedException e) {
             // expected
         }
         try {
-            accessControl.checkCanDropTable(TRANSACTION_HANDLE, user("bob"), SchemaTableName.valueOf("bobschema.bobtable"));
+            accessControl.checkCanDropTable(TRANSACTION_HANDLE, user("bob"), new SchemaTableName("bobschema", "bobtable"));
             fail();
         }
         catch (AccessDeniedException e) {
             // expected
         }
         try {
-            accessControl.checkCanInsertIntoTable(TRANSACTION_HANDLE, user("bob"), SchemaTableName.valueOf("test.test"));
+            accessControl.checkCanInsertIntoTable(TRANSACTION_HANDLE, user("bob"), new SchemaTableName("test", "test"));
             fail();
         }
         catch (AccessDeniedException e) {
             // expected
         }
         try {
-            accessControl.checkCanSelectFromTable(TRANSACTION_HANDLE, user("admin"), SchemaTableName.valueOf("secret.secret"));
+            accessControl.checkCanSelectFromTable(TRANSACTION_HANDLE, user("admin"), new SchemaTableName("secret", "secret"));
             fail();
         }
         catch (AccessDeniedException e) {
@@ -127,9 +127,9 @@ public class TestFileBasedAccessControl
         }
     }
 
-    private static Identity user(String name)
+    private static ConnectorIdentity user(String name)
     {
-        return new Identity(name, Optional.empty());
+        return new ConnectorIdentity(name, Optional.empty(), Optional.empty());
     }
 
     private ConnectorAccessControl createAccessControl(String fileName)

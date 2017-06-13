@@ -15,25 +15,34 @@ package com.facebook.presto.operator;
 
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageBuilder;
-import com.google.common.primitives.Ints;
 
 import javax.annotation.concurrent.GuardedBy;
+import javax.annotation.concurrent.NotThreadSafe;
+import javax.annotation.concurrent.ThreadSafe;
+
+import java.util.function.Supplier;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Verify.verify;
+import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 
+@NotThreadSafe
 public final class OuterLookupSource
         implements LookupSource
 {
+    public static Supplier<LookupSource> createOuterLookupSourceSupplier(Supplier<LookupSource> lookupSourceSupplier)
+    {
+        return new OuterLookupSourceSupplier(lookupSourceSupplier);
+    }
+
     private final LookupSource lookupSource;
+    private final OuterPositionTracker outerPositionTracker;
 
-    @GuardedBy("this")
-    private final boolean[] visitedPositions;
-
-    public OuterLookupSource(LookupSource lookupSource)
+    private OuterLookupSource(LookupSource lookupSource, OuterPositionTracker outerPositionTracker)
     {
         this.lookupSource = requireNonNull(lookupSource, "lookupSource is null");
-        this.visitedPositions = new boolean[lookupSource.getJoinPositionCount()];
+        this.outerPositionTracker = requireNonNull(outerPositionTracker, "outerPositionTracker is null");
     }
 
     @Override
@@ -73,26 +82,31 @@ public final class OuterLookupSource
     }
 
     @Override
-    public void appendTo(long position, PageBuilder pageBuilder, int outputChannelOffset)
+    public boolean isJoinPositionEligible(long currentJoinPosition, int probePosition, Page allProbeChannelsPage)
     {
-        lookupSource.appendTo(position, pageBuilder, outputChannelOffset);
-        synchronized (this) {
-            visitedPositions[Ints.checkedCast(position)] = true;
-        }
+        return lookupSource.isJoinPositionEligible(currentJoinPosition, probePosition, allProbeChannelsPage);
     }
 
     @Override
-    public synchronized OuterPositionIterator getOuterPositionIterator()
+    public void appendTo(long position, PageBuilder pageBuilder, int outputChannelOffset)
     {
-        return new SharedLookupOuterPositionIterator(lookupSource, visitedPositions);
+        lookupSource.appendTo(position, pageBuilder, outputChannelOffset);
+        outerPositionTracker.positionVisited(position);
+    }
+
+    @Override
+    public OuterPositionIterator getOuterPositionIterator()
+    {
+        return outerPositionTracker.getOuterPositionIterator();
     }
 
     @Override
     public void close()
     {
-        // this method only exists for index lookup which does not support build outer
+        lookupSource.close();
     }
 
+    @ThreadSafe
     private static class SharedLookupOuterPositionIterator
             implements OuterPositionIterator
     {
@@ -121,6 +135,59 @@ public final class OuterLookupSource
                 currentPosition++;
             }
             return false;
+        }
+    }
+
+    @ThreadSafe
+    private static class OuterLookupSourceSupplier
+            implements Supplier<LookupSource>
+    {
+        private final Supplier<LookupSource> lookupSourceSupplier;
+        private final OuterPositionTracker outerPositionTracker;
+
+        public OuterLookupSourceSupplier(Supplier<LookupSource> lookupSourceSupplier)
+        {
+            this.lookupSourceSupplier = requireNonNull(lookupSourceSupplier, "lookupSourceSupplier is null");
+            this.outerPositionTracker = new OuterPositionTracker(lookupSourceSupplier);
+        }
+
+        @Override
+        public LookupSource get()
+        {
+            return new OuterLookupSource(lookupSourceSupplier.get(), outerPositionTracker);
+        }
+    }
+
+    @ThreadSafe
+    private static class OuterPositionTracker
+    {
+        private final Supplier<LookupSource> lookupSourceSupplier;
+
+        @GuardedBy("this")
+        private final boolean[] visitedPositions;
+
+        @GuardedBy("this")
+        private boolean finished;
+
+        public OuterPositionTracker(Supplier<LookupSource> lookupSourceSupplier)
+        {
+            this.lookupSourceSupplier = lookupSourceSupplier;
+
+            try (LookupSource lookupSource = lookupSourceSupplier.get()) {
+                this.visitedPositions = new boolean[lookupSource.getJoinPositionCount()];
+            }
+        }
+
+        public synchronized void positionVisited(long position)
+        {
+            verify(!finished);
+            visitedPositions[toIntExact(position)] = true;
+        }
+
+        public synchronized OuterPositionIterator getOuterPositionIterator()
+        {
+            finished = true;
+            return new SharedLookupOuterPositionIterator(lookupSourceSupplier.get(), visitedPositions);
         }
     }
 }

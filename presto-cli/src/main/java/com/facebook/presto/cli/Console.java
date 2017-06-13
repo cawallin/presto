@@ -15,6 +15,7 @@ package com.facebook.presto.cli;
 
 import com.facebook.presto.cli.ClientOptions.OutputFormat;
 import com.facebook.presto.client.ClientSession;
+import com.facebook.presto.spi.security.SelectedRole;
 import com.facebook.presto.sql.parser.IdentifierSymbol;
 import com.facebook.presto.sql.parser.ParsingException;
 import com.facebook.presto.sql.parser.SqlParser;
@@ -51,14 +52,17 @@ import java.util.regex.Pattern;
 import static com.facebook.presto.cli.Completion.commandCompleter;
 import static com.facebook.presto.cli.Completion.lowerCaseCommandCompleter;
 import static com.facebook.presto.cli.Help.getHelpText;
+import static com.facebook.presto.cli.QueryPreprocessor.preprocessQuery;
 import static com.facebook.presto.client.ClientSession.stripTransactionId;
 import static com.facebook.presto.client.ClientSession.withCatalogAndSchema;
 import static com.facebook.presto.client.ClientSession.withPreparedStatements;
 import static com.facebook.presto.client.ClientSession.withProperties;
+import static com.facebook.presto.client.ClientSession.withRoles;
 import static com.facebook.presto.client.ClientSession.withTransactionId;
 import static com.facebook.presto.sql.parser.StatementSplitter.Statement;
 import static com.facebook.presto.sql.parser.StatementSplitter.isEmptyStatement;
 import static com.facebook.presto.sql.parser.StatementSplitter.squeezeStatement;
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.io.ByteStreams.nullOutputStream;
 import static java.lang.Integer.parseInt;
 import static java.lang.String.format;
@@ -130,6 +134,8 @@ public class Console
                 Optional.ofNullable(clientOptions.keystorePassword),
                 Optional.ofNullable(clientOptions.truststorePath),
                 Optional.ofNullable(clientOptions.truststorePassword),
+                Optional.ofNullable(clientOptions.user),
+                getPassword(),
                 Optional.ofNullable(clientOptions.krb5Principal),
                 Optional.ofNullable(clientOptions.krb5RemoteServiceName),
                 clientOptions.authenticationEnabled,
@@ -141,6 +147,33 @@ public class Console
                 runConsole(queryRunner, session, exiting);
             }
         }
+    }
+
+    private Optional<String> getPassword()
+    {
+        if (clientOptions.showPasswordPrompt) {
+            return Optional.ofNullable(promptPassword());
+        }
+        return Optional.ofNullable(clientOptions.password);
+    }
+
+    private String promptPassword()
+    {
+        checkState(clientOptions.user != null, "Username must be specified along with password");
+        String defaultPassword = System.getenv("PRESTO_PASSWORD");
+        if (defaultPassword != null) {
+            return defaultPassword;
+        }
+
+        java.io.Console console = System.console();
+        if (console == null) {
+            throw new RuntimeException("No console from which to read password");
+        }
+        char[] password = console.readPassword("Password: ");
+        if (password != null) {
+            return new String(password);
+        }
+        return "";
     }
 
     private static void runConsole(QueryRunner queryRunner, ClientSession session, AtomicBoolean exiting)
@@ -292,7 +325,22 @@ public class Console
 
     private static void process(QueryRunner queryRunner, String sql, OutputFormat outputFormat, boolean interactive)
     {
-        try (Query query = queryRunner.startQuery(sql)) {
+        String finalSql;
+        try {
+            finalSql = preprocessQuery(
+                    Optional.ofNullable(queryRunner.getSession().getCatalog()),
+                    Optional.ofNullable(queryRunner.getSession().getSchema()),
+                    sql);
+        }
+        catch (QueryPreprocessorException e) {
+            System.err.println(e.getMessage());
+            if (queryRunner.getSession().isDebug()) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        try (Query query = queryRunner.startQuery(finalSql)) {
             query.renderOutput(System.out, outputFormat, interactive);
 
             ClientSession session = queryRunner.getSession();
@@ -303,6 +351,13 @@ public class Console
                 sessionProperties.putAll(query.getSetSessionProperties());
                 sessionProperties.keySet().removeAll(query.getResetSessionProperties());
                 session = withProperties(session, sessionProperties);
+            }
+
+            // update session roles
+            if (!query.getSetRoles().isEmpty()) {
+                Map<String, SelectedRole> roles = new HashMap<>(session.getRoles());
+                roles.putAll(query.getSetRoles());
+                session = withRoles(session, roles);
             }
 
             // update prepared statements if present

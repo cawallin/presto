@@ -253,20 +253,13 @@ public class InterleavedBlockBuilder
     }
 
     @Override
-    public void reset(BlockBuilderStatus blockBuilderStatus)
+    public BlockBuilder newBlockBuilderLike(BlockBuilderStatus blockBuilderStatus)
     {
-        this.positionCount = 0;
-
-        this.sizeInBytes = 0;
-        this.retainedSizeInBytes = INSTANCE_SIZE;
-        for (BlockBuilder blockBuilder : blockBuilders) {
-            blockBuilder.reset(blockBuilderStatus);
-            this.sizeInBytes += blockBuilder.getSizeInBytes();
-            this.retainedSizeInBytes += blockBuilder.getRetainedSizeInBytes();
+        BlockBuilder[] newBlockBuilders = new BlockBuilder[blockBuilders.length];
+        for (int i = 0; i < blockBuilders.length; i++) {
+            newBlockBuilders[i] = blockBuilders[i].newBlockBuilderLike(blockBuilderStatus);
         }
-
-        this.startSize = -1;
-        this.startRetainedSize = -1;
+        return new InterleavedBlockBuilder(newBlockBuilders);
     }
 
     @Override

@@ -16,6 +16,8 @@ package com.facebook.presto.accumulo;
 import com.facebook.presto.accumulo.conf.AccumuloConfig;
 import com.facebook.presto.accumulo.conf.AccumuloSessionProperties;
 import com.facebook.presto.accumulo.conf.AccumuloTableProperties;
+import com.facebook.presto.accumulo.index.ColumnCardinalityCache;
+import com.facebook.presto.accumulo.index.IndexLookup;
 import com.facebook.presto.accumulo.io.AccumuloPageSinkProvider;
 import com.facebook.presto.accumulo.io.AccumuloRecordSetProvider;
 import com.facebook.presto.accumulo.metadata.AccumuloTable;
@@ -27,7 +29,6 @@ import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.deser.std.FromStringDeserializer;
 import com.google.inject.Binder;
 import com.google.inject.Module;
-import com.google.inject.Provider;
 import com.google.inject.Scopes;
 import io.airlift.json.JsonCodec;
 import io.airlift.log.Logger;
@@ -42,6 +43,7 @@ import org.apache.log4j.Level;
 import org.apache.log4j.PatternLayout;
 
 import javax.inject.Inject;
+import javax.inject.Provider;
 
 import static com.facebook.presto.accumulo.AccumuloErrorCode.UNEXPECTED_ACCUMULO_ERROR;
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
@@ -96,6 +98,8 @@ public class AccumuloModule
         binder.bind(AccumuloTableProperties.class).in(Scopes.SINGLETON);
         binder.bind(ZooKeeperMetadataManager.class).in(Scopes.SINGLETON);
         binder.bind(AccumuloTableManager.class).in(Scopes.SINGLETON);
+        binder.bind(IndexLookup.class).in(Scopes.SINGLETON);
+        binder.bind(ColumnCardinalityCache.class).in(Scopes.SINGLETON);
         binder.bind(Connector.class).toProvider(ConnectorProvider.class);
 
         configBinder(binder).bindConfig(AccumuloConfig.class);
@@ -129,21 +133,29 @@ public class AccumuloModule
             implements Provider<Connector>
     {
         private static final Logger LOG = Logger.get(ConnectorProvider.class);
-        private final AccumuloConfig config;
+
+        private final String instance;
+        private final String zooKeepers;
+        private final String username;
+        private final String password;
 
         @Inject
         public ConnectorProvider(AccumuloConfig config)
         {
-            this.config = requireNonNull(config, "config is null");
+            requireNonNull(config, "config is null");
+            this.instance = config.getInstance();
+            this.zooKeepers = config.getZooKeepers();
+            this.username = config.getUsername();
+            this.password = config.getPassword();
         }
 
         @Override
         public Connector get()
         {
             try {
-                Instance inst = new ZooKeeperInstance(config.getInstance(), config.getZooKeepers());
-                Connector connector = inst.getConnector(config.getUsername(), new PasswordToken(config.getPassword().getBytes(UTF_8)));
-                LOG.info("Connection to instance %s at %s established, user %s", config.getInstance(), config.getZooKeepers(), config.getUsername());
+                Instance inst = new ZooKeeperInstance(instance, zooKeepers);
+                Connector connector = inst.getConnector(username, new PasswordToken(password.getBytes(UTF_8)));
+                LOG.info("Connection to instance %s at %s established, user %s", instance, zooKeepers, username);
                 return connector;
             }
             catch (AccumuloException | AccumuloSecurityException e) {

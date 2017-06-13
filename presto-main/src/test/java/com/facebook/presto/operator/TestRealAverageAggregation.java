@@ -23,7 +23,7 @@ import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.google.common.collect.ImmutableList;
-import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 import java.util.List;
@@ -40,7 +40,7 @@ public class TestRealAverageAggregation
 {
     private InternalAggregationFunction avgFunction;
 
-    @BeforeMethod
+    @BeforeClass
     public void setUp()
     {
         MetadataManager metadata = MetadataManager.createTestMetadataManager();
@@ -52,7 +52,6 @@ public class TestRealAverageAggregation
     public void averageOfNullIsNull()
     {
         assertAggregation(avgFunction,
-                1.0,
                 null,
                 createBlockOfReals(null, null));
     }
@@ -61,7 +60,6 @@ public class TestRealAverageAggregation
     public void averageOfSingleValueEqualsThatValue()
     {
         assertAggregation(avgFunction,
-                1.0,
                 1.23f,
                 createBlockOfReals(1.23f));
     }
@@ -70,7 +68,6 @@ public class TestRealAverageAggregation
     public void averageOfTwoMaxFloatsEqualsMaxFloat()
     {
         assertAggregation(avgFunction,
-                1.0,
                 Float.MAX_VALUE,
                 createBlockOfReals(Float.MAX_VALUE, Float.MAX_VALUE));
     }

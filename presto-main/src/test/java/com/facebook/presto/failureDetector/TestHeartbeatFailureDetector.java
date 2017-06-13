@@ -14,6 +14,7 @@
 package com.facebook.presto.failureDetector;
 
 import com.facebook.presto.execution.QueryManagerConfig;
+import com.facebook.presto.server.InternalCommunicationConfig;
 import com.google.inject.Binder;
 import com.google.inject.Injector;
 import com.google.inject.Key;
@@ -59,6 +60,7 @@ public class TestHeartbeatFailureDetector
                     @Override
                     public void configure(Binder binder)
                     {
+                        configBinder(binder).bindConfig(InternalCommunicationConfig.class);
                         configBinder(binder).bindConfig(QueryManagerConfig.class);
                         discoveryBinder(binder).bindSelector("presto");
                         discoveryBinder(binder).bindHttpAnnouncement("presto");
@@ -72,6 +74,7 @@ public class TestHeartbeatFailureDetector
         Injector injector = app
                 .strictConfig()
                 .doNotInitializeLogging()
+                .quiet()
                 .initialize();
 
         ServiceSelector selector = injector.getInstance(Key.get(ServiceSelector.class, serviceType("presto")));
@@ -90,7 +93,7 @@ public class TestHeartbeatFailureDetector
     public static class FooResource
     {
         @GET
-        public String hello()
+        public static String hello()
         {
             return "hello";
         }

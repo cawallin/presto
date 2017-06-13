@@ -15,6 +15,7 @@ package com.facebook.presto.connector.informationSchema;
 
 import com.facebook.presto.metadata.InternalNodeManager;
 import com.facebook.presto.metadata.Metadata;
+import com.facebook.presto.security.AccessControl;
 import com.facebook.presto.spi.connector.ConnectorMetadata;
 import com.facebook.presto.spi.connector.ConnectorPageSourceProvider;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
@@ -22,6 +23,7 @@ import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
 import com.facebook.presto.spi.transaction.IsolationLevel;
 import com.facebook.presto.transaction.InternalConnector;
 import com.facebook.presto.transaction.TransactionId;
+import com.facebook.presto.transaction.TransactionManager;
 
 import static java.util.Objects.requireNonNull;
 
@@ -32,15 +34,16 @@ public class InformationSchemaConnector
     private final ConnectorSplitManager splitManager;
     private final ConnectorPageSourceProvider pageSourceProvider;
 
-    public InformationSchemaConnector(String catalogName, InternalNodeManager nodeManager, Metadata metadata)
+    public InformationSchemaConnector(String catalogName, InternalNodeManager nodeManager, Metadata metadata, AccessControl accessControl, TransactionManager transactionManager)
     {
         requireNonNull(catalogName, "catalogName is null");
         requireNonNull(nodeManager, "nodeManager is null");
         requireNonNull(metadata, "metadata is null");
+        requireNonNull(transactionManager, "transactionManager is null");
 
         this.metadata = new InformationSchemaMetadata(catalogName);
         this.splitManager = new InformationSchemaSplitManager(nodeManager);
-        this.pageSourceProvider = new InformationSchemaPageSourceProvider(metadata);
+        this.pageSourceProvider = new InformationSchemaPageSourceProvider(metadata, accessControl, transactionManager);
     }
 
     @Override

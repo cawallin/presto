@@ -13,12 +13,10 @@
  */
 package com.facebook.presto.raptor;
 
-import com.facebook.presto.testing.QueryRunner;
 import com.facebook.presto.tests.AbstractTestDistributedQueries;
 import com.google.common.collect.ImmutableMap;
 
 import static com.facebook.presto.raptor.RaptorQueryRunner.createRaptorQueryRunner;
-import static com.facebook.presto.raptor.RaptorQueryRunner.createSampledSession;
 
 public class TestRaptorDistributedQueries
         extends AbstractTestDistributedQueries
@@ -27,11 +25,11 @@ public class TestRaptorDistributedQueries
     public TestRaptorDistributedQueries()
             throws Exception
     {
-        this(createRaptorQueryRunner(ImmutableMap.of(), true, false));
+        this(() -> createRaptorQueryRunner(ImmutableMap.of(), true, false));
     }
 
-    protected TestRaptorDistributedQueries(QueryRunner queryRunner)
+    protected TestRaptorDistributedQueries(QueryRunnerSupplier supplier)
     {
-        super(queryRunner, createSampledSession());
+        super(supplier);
     }
 }

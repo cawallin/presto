@@ -33,6 +33,7 @@ import java.util.List;
 
 import static com.facebook.presto.spi.type.StandardTypes.ARRAY;
 import static com.facebook.presto.type.TypeUtils.checkElementNotNull;
+import static com.facebook.presto.type.TypeUtils.hashPosition;
 import static java.util.Objects.requireNonNull;
 
 public class ArrayType
@@ -89,10 +90,9 @@ public class ArrayType
     public long hash(Block block, int position)
     {
         Block array = getObject(block, position);
-        int hash = 0;
+        long hash = 0;
         for (int i = 0; i < array.getPositionCount(); i++) {
-            checkElementNotNull(array.isNull(i), ARRAY_NULL_ELEMENT_MSG);
-            hash = (int) CombineHashFunction.getHash(hash, elementType.hash(array, i));
+            hash = CombineHashFunction.getHash(hash, hashPosition(elementType, array, i));
         }
         return hash;
     }
@@ -168,7 +168,7 @@ public class ArrayType
     @Override
     public Slice getSlice(Block block, int position)
     {
-        return block.getSlice(position, 0, block.getLength(position));
+        return block.getSlice(position, 0, block.getSliceLength(position));
     }
 
     @Override

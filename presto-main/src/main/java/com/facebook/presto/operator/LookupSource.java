@@ -16,8 +16,11 @@ package com.facebook.presto.operator;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageBuilder;
 
+import javax.annotation.concurrent.NotThreadSafe;
+
 import java.io.Closeable;
 
+@NotThreadSafe
 public interface LookupSource
         extends Closeable
 {
@@ -40,7 +43,8 @@ public interface LookupSource
         return (pageBuilder, outputChannelOffset) -> false;
     }
 
-    // this is only here for index lookup source
+    boolean isJoinPositionEligible(long currentJoinPosition, int probePosition, Page allProbeChannelsPage);
+
     @Override
     void close();
 

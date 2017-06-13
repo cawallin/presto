@@ -18,6 +18,7 @@ import com.facebook.presto.kafka.util.EmbeddedKafka;
 import com.facebook.presto.kafka.util.TestUtils;
 import com.facebook.presto.metadata.QualifiedObjectName;
 import com.facebook.presto.metadata.TableHandle;
+import com.facebook.presto.security.AllowAllAccessControl;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.type.BigintType;
 import com.facebook.presto.testing.MaterializedResult;
@@ -37,8 +38,8 @@ import java.util.UUID;
 import static com.facebook.presto.kafka.util.EmbeddedKafka.CloseableProducer;
 import static com.facebook.presto.kafka.util.TestUtils.createEmptyTopicDescription;
 import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
+import static com.facebook.presto.testing.assertions.Assert.assertEquals;
 import static com.facebook.presto.transaction.TransactionBuilder.transaction;
-import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
 
 @Test(singleThreaded = true)
@@ -108,7 +109,7 @@ public class TestMinimalFunctionality
     {
         QualifiedObjectName name = new QualifiedObjectName("kafka", "default", topicName);
 
-        transaction(queryRunner.getTransactionManager())
+        transaction(queryRunner.getTransactionManager(), new AllowAllAccessControl())
                 .singleStatement()
                 .execute(SESSION, session -> {
                     Optional<TableHandle> handle = queryRunner.getServer().getMetadata().getTableHandle(session, name);

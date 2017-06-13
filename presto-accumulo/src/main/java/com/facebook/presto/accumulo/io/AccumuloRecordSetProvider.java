@@ -30,7 +30,6 @@ import javax.inject.Inject;
 
 import java.util.List;
 
-import static com.facebook.presto.accumulo.Types.checkType;
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
 
@@ -43,9 +42,9 @@ import static java.util.Objects.requireNonNull;
 public class AccumuloRecordSetProvider
         implements ConnectorRecordSetProvider
 {
-    private final AccumuloConfig config;
     private final Connector connector;
     private final String connectorId;
+    private final String username;
 
     @Inject
     public AccumuloRecordSetProvider(
@@ -53,9 +52,9 @@ public class AccumuloRecordSetProvider
             AccumuloConnectorId connectorId,
             AccumuloConfig config)
     {
-        this.config = requireNonNull(config, "config is null");
         this.connector = requireNonNull(connector, "connector is null");
         this.connectorId = requireNonNull(connectorId, "connectorId is null").toString();
+        this.username = requireNonNull(config, "config is null").getUsername();
     }
 
     @Override
@@ -65,16 +64,16 @@ public class AccumuloRecordSetProvider
         requireNonNull(columns, "columns is null");
 
         // Convert split
-        AccumuloSplit accSplit = checkType(split, AccumuloSplit.class, "split");
+        AccumuloSplit accSplit = (AccumuloSplit) split;
         checkArgument(accSplit.getConnectorId().equals(connectorId), "split is not for this connector");
 
         // Convert all columns handles
         ImmutableList.Builder<AccumuloColumnHandle> handles = ImmutableList.builder();
         for (ColumnHandle handle : columns) {
-            handles.add(checkType(handle, AccumuloColumnHandle.class, "handle"));
+            handles.add((AccumuloColumnHandle) handle);
         }
 
         // Return new record set
-        return new AccumuloRecordSet(connector, session, config, accSplit, handles.build());
+        return new AccumuloRecordSet(connector, session, accSplit, username, handles.build());
     }
 }

@@ -13,23 +13,20 @@
  */
 package com.facebook.presto.hive.metastore;
 
+import com.facebook.presto.spi.security.PrestoPrincipal;
+import com.facebook.presto.spi.security.RoleGrant;
+import org.apache.hadoop.hive.metastore.api.ColumnStatisticsObj;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.Partition;
-import org.apache.hadoop.hive.metastore.api.PrivilegeGrantInfo;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.weakref.jmx.Managed;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.hadoop.hive.metastore.api.PrincipalType.ROLE;
-import static org.apache.hadoop.hive.metastore.api.PrincipalType.USER;
-
 public interface HiveMetastore
 {
-    String DEFAULT_DATABASE_NAME = "default";
-
     void createDatabase(Database database);
 
     void dropDatabase(String databaseName);
@@ -41,9 +38,6 @@ public interface HiveMetastore
     void dropTable(String databaseName, String tableName, boolean deleteData);
 
     void alterTable(String databaseName, String tableName, Table table);
-
-    @Managed
-    void flushCache();
 
     List<String> getAllDatabases();
 
@@ -74,44 +68,25 @@ public interface HiveMetastore
 
     Optional<Table> getTable(String databaseName, String tableName);
 
-    Set<String> getRoles(String user);
+    Optional<Set<ColumnStatisticsObj>> getTableColumnStatistics(String databaseName, String tableName, Set<String> columnNames);
 
-    Set<HivePrivilegeInfo> getDatabasePrivileges(String user, String databaseName);
+    Optional<Map<String, Set<ColumnStatisticsObj>>> getPartitionColumnStatistics(String databaseName, String tableName, Set<String> partitionNames, Set<String> columnNames);
 
-    Set<HivePrivilegeInfo> getTablePrivileges(String user, String databaseName, String tableName);
+    void createRole(String role, String grantor);
 
-    void grantTablePrivileges(String databaseName, String tableName, String grantee, Set<PrivilegeGrantInfo> privilegeGrantInfoSet);
+    void dropRole(String role);
 
-    void revokeTablePrivileges(String databaseName, String tableName, String grantee, Set<PrivilegeGrantInfo> privilegeGrantInfoSet);
+    Set<String> listRoles();
 
-    default boolean isDatabaseOwner(String user, String databaseName)
-    {
-        // all users are "owners" of the default database
-        if (DEFAULT_DATABASE_NAME.equalsIgnoreCase(databaseName)) {
-            return true;
-        }
+    void grantRoles(Set<String> roles, Set<PrestoPrincipal> grantees, boolean withAdminOption, PrestoPrincipal grantor);
 
-        Optional<Database> databaseMetadata = getDatabase(databaseName);
-        if (!databaseMetadata.isPresent()) {
-            return false;
-        }
+    void revokeRoles(Set<String> roles, Set<PrestoPrincipal> grantees, boolean adminOptionFor, PrestoPrincipal grantor);
 
-        Database database = databaseMetadata.get();
+    Set<RoleGrant> listRoleGrants(PrestoPrincipal principal);
 
-        // a database can be owned by a user or role
-        if (database.getOwnerType() == USER && user.equals(database.getOwnerName())) {
-            return true;
-        }
-        if (database.getOwnerType() == ROLE && getRoles(user).contains(database.getOwnerName())) {
-            return true;
-        }
-        return false;
-    }
+    void grantTablePrivileges(String databaseName, String tableName, PrestoPrincipal grantee, Set<HivePrivilegeInfo> privileges);
 
-    default boolean isTableOwner(String user, String databaseName, String tableName)
-    {
-        // a table can only be owned by a user
-        Optional<Table> table = getTable(databaseName, tableName);
-        return table.isPresent() && user.equals(table.get().getOwner());
-    }
+    void revokeTablePrivileges(String databaseName, String tableName, PrestoPrincipal grantee, Set<HivePrivilegeInfo> privileges);
+
+    Set<HivePrivilegeInfo> listTablePrivileges(String databaseName, String tableName, PrestoPrincipal principal);
 }

@@ -50,10 +50,10 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import io.airlift.concurrent.MoreFutures;
 import io.airlift.json.JsonCodec;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
+import io.airlift.slice.XxHash64;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
 
@@ -62,8 +62,10 @@ import javax.inject.Inject;
 
 import java.io.Closeable;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -103,13 +105,16 @@ import static com.facebook.presto.spi.type.VarcharType.createUnboundedVarcharTyp
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Throwables.propagateIfInstanceOf;
+import static io.airlift.concurrent.MoreFutures.allAsList;
 import static io.airlift.concurrent.MoreFutures.getFutureValue;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
 import static io.airlift.json.JsonCodec.jsonCodec;
 import static java.lang.Math.min;
 import static java.nio.file.StandardCopyOption.ATOMIC_MOVE;
 import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.CompletableFuture.completedFuture;
 import static java.util.concurrent.CompletableFuture.supplyAsync;
+import static java.util.concurrent.Executors.newCachedThreadPool;
 import static java.util.concurrent.Executors.newFixedThreadPool;
 import static java.util.stream.Collectors.toList;
 import static org.joda.time.DateTimeZone.UTC;
@@ -117,13 +122,14 @@ import static org.joda.time.DateTimeZone.UTC;
 public class OrcStorageManager
         implements StorageManager
 {
+    private static final JsonCodec<ShardDelta> SHARD_DELTA_CODEC = jsonCodec(ShardDelta.class);
+
     private static final long MAX_ROWS = 1_000_000_000;
     private static final JsonCodec<OrcFileMetadata> METADATA_CODEC = jsonCodec(OrcFileMetadata.class);
 
     private final String nodeId;
     private final StorageService storageService;
     private final Optional<BackupStore> backupStore;
-    private final JsonCodec<ShardDelta> shardDeltaCodec;
     private final ReaderAttributes defaultReaderAttributes;
     private final BackupManager backupManager;
     private final ShardRecoveryManager recoveryManager;
@@ -134,13 +140,13 @@ public class OrcStorageManager
     private final DataSize minAvailableSpace;
     private final TypeManager typeManager;
     private final ExecutorService deletionExecutor;
+    private final ExecutorService commitExecutor;
 
     @Inject
     public OrcStorageManager(
             NodeManager nodeManager,
             StorageService storageService,
             Optional<BackupStore> backupStore,
-            JsonCodec<ShardDelta> shardDeltaCodec,
             ReaderAttributes readerAttributes,
             StorageManagerConfig config,
             RaptorConnectorId connectorId,
@@ -152,7 +158,6 @@ public class OrcStorageManager
         this(nodeManager.getCurrentNode().getNodeIdentifier(),
                 storageService,
                 backupStore,
-                shardDeltaCodec,
                 readerAttributes,
                 backgroundBackupManager,
                 recoveryManager,
@@ -170,7 +175,6 @@ public class OrcStorageManager
             String nodeId,
             StorageService storageService,
             Optional<BackupStore> backupStore,
-            JsonCodec<ShardDelta> shardDeltaCodec,
             ReaderAttributes readerAttributes,
             BackupManager backgroundBackupManager,
             ShardRecoveryManager recoveryManager,
@@ -186,7 +190,6 @@ public class OrcStorageManager
         this.nodeId = requireNonNull(nodeId, "nodeId is null");
         this.storageService = requireNonNull(storageService, "storageService is null");
         this.backupStore = requireNonNull(backupStore, "backupStore is null");
-        this.shardDeltaCodec = requireNonNull(shardDeltaCodec, "shardDeltaCodec is null");
         this.defaultReaderAttributes = requireNonNull(readerAttributes, "readerAttributes is null");
 
         backupManager = requireNonNull(backgroundBackupManager, "backgroundBackupManager is null");
@@ -200,12 +203,14 @@ public class OrcStorageManager
         this.shardRecorder = requireNonNull(shardRecorder, "shardRecorder is null");
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
         this.deletionExecutor = newFixedThreadPool(deletionThreads, daemonThreadsNamed("raptor-delete-" + connectorId + "-%s"));
+        this.commitExecutor = newCachedThreadPool(daemonThreadsNamed("raptor-commit-" + connectorId + "-%s"));
     }
 
     @PreDestroy
     public void shutdown()
     {
         deletionExecutor.shutdownNow();
+        commitExecutor.shutdown();
     }
 
     @Override
@@ -291,7 +296,12 @@ public class OrcStorageManager
 
     private ShardRewriter createShardRewriter(long transactionId, OptionalInt bucketNumber, UUID shardUuid)
     {
-        return rowsToDelete -> supplyAsync(() -> rewriteShard(transactionId, bucketNumber, shardUuid, rowsToDelete), deletionExecutor);
+        return rowsToDelete -> {
+            if (rowsToDelete.isEmpty()) {
+                return completedFuture(ImmutableList.of());
+            }
+            return supplyAsync(() -> rewriteShard(transactionId, bucketNumber, shardUuid, rowsToDelete), deletionExecutor);
+        };
     }
 
     private void writeShard(UUID shardUuid)
@@ -352,7 +362,7 @@ public class OrcStorageManager
 
     private ShardInfo createShardInfo(UUID shardUuid, OptionalInt bucketNumber, File file, Set<String> nodes, long rowCount, long uncompressedSize)
     {
-        return new ShardInfo(shardUuid, bucketNumber, nodes, computeShardStats(file), rowCount, file.length(), uncompressedSize);
+        return new ShardInfo(shardUuid, bucketNumber, nodes, computeShardStats(file), rowCount, file.length(), uncompressedSize, xxhash64(file));
     }
 
     private List<ColumnStats> computeShardStats(File file)
@@ -404,11 +414,11 @@ public class OrcStorageManager
         return shardDelta(shardUuid, Optional.of(shard));
     }
 
-    private Collection<Slice> shardDelta(UUID oldShardUuid, Optional<ShardInfo> shardInfo)
+    private static Collection<Slice> shardDelta(UUID oldShardUuid, Optional<ShardInfo> shardInfo)
     {
         List<ShardInfo> newShards = shardInfo.map(ImmutableList::of).orElse(ImmutableList.of());
         ShardDelta delta = new ShardDelta(ImmutableList.of(oldShardUuid), newShards);
-        return ImmutableList.of(Slices.wrappedBuffer(shardDeltaCodec.toJsonBytes(delta)));
+        return ImmutableList.of(Slices.wrappedBuffer(SHARD_DELTA_CODEC.toJsonBytes(delta)));
     }
 
     private static OrcFileInfo rewriteFile(File input, File output, BitSet rowsToDelete)
@@ -444,6 +454,16 @@ public class OrcStorageManager
             list.add(new ColumnInfo(Long.parseLong(orcColumnNames.get(i)), rowType.getTypeParameters().get(i)));
         }
         return list.build();
+    }
+
+    static long xxhash64(File file)
+    {
+        try (InputStream in = new FileInputStream(file)) {
+            return XxHash64.hash(in);
+        }
+        catch (IOException e) {
+            throw new PrestoException(RAPTOR_ERROR, "Failed to read file: " + file, e);
+        }
     }
 
     private static Optional<OrcFileMetadata> getOrcFileMetadata(OrcReader reader)
@@ -593,20 +613,19 @@ public class OrcStorageManager
         }
 
         @Override
-        public List<ShardInfo> commit()
+        public CompletableFuture<List<ShardInfo>> commit()
         {
             checkState(!committed, "already committed");
             committed = true;
 
             flush();
 
-            // backup jobs depend on the staging files, so wait until all backups have finished
-            futures.forEach(MoreFutures::getFutureValue);
-
-            for (ShardInfo shard : shards) {
-                writeShard(shard.getShardUuid());
-            }
-            return ImmutableList.copyOf(shards);
+            return allAsList(futures).thenApplyAsync(ignored -> {
+                for (ShardInfo shard : shards) {
+                    writeShard(shard.getShardUuid());
+                }
+                return ImmutableList.copyOf(shards);
+            }, commitExecutor);
         }
 
         @SuppressWarnings("ResultOfMethodCallIgnored")

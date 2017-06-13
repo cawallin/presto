@@ -26,6 +26,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 
 import javax.annotation.concurrent.Immutable;
 
@@ -44,7 +45,6 @@ public class TableWriterNode
     private final List<Symbol> outputs;
     private final List<Symbol> columns;
     private final List<String> columnNames;
-    private final Optional<Symbol> sampleWeightSymbol;
     private final Optional<PartitioningScheme> partitioningScheme;
 
     @JsonCreator
@@ -55,7 +55,6 @@ public class TableWriterNode
             @JsonProperty("columns") List<Symbol> columns,
             @JsonProperty("columnNames") List<String> columnNames,
             @JsonProperty("outputs") List<Symbol> outputs,
-            @JsonProperty("sampleWeightSymbol") Optional<Symbol> sampleWeightSymbol,
             @JsonProperty("partitioningScheme") Optional<PartitioningScheme> partitioningScheme)
     {
         super(id);
@@ -69,14 +68,7 @@ public class TableWriterNode
         this.columns = ImmutableList.copyOf(columns);
         this.columnNames = ImmutableList.copyOf(columnNames);
         this.outputs = ImmutableList.copyOf(requireNonNull(outputs, "outputs is null"));
-        this.sampleWeightSymbol = requireNonNull(sampleWeightSymbol, "sampleWeightSymbol is null");
         this.partitioningScheme = requireNonNull(partitioningScheme, "partitioningScheme is null");
-    }
-
-    @JsonProperty
-    public Optional<Symbol> getSampleWeightSymbol()
-    {
-        return sampleWeightSymbol;
     }
 
     @JsonProperty
@@ -123,9 +115,15 @@ public class TableWriterNode
     }
 
     @Override
-    public <C, R> R accept(PlanVisitor<C, R> visitor, C context)
+    public <R, C> R accept(PlanVisitor<R, C> visitor, C context)
     {
         return visitor.visitTableWriter(this, context);
+    }
+
+    @Override
+    public PlanNode replaceChildren(List<PlanNode> newChildren)
+    {
+        return new TableWriterNode(getId(), Iterables.getOnlyElement(newChildren), target, columns, columnNames, outputs, partitioningScheme);
     }
 
     @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "@type")

@@ -15,6 +15,7 @@ package com.facebook.presto.tests;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.connector.ConnectorId;
+import com.facebook.presto.cost.CostCalculator;
 import com.facebook.presto.metadata.AllNodes;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.QualifiedObjectName;
@@ -39,6 +40,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import static com.facebook.presto.tests.AbstractTestQueries.TEST_CATALOG_PROPERTIES;
+import static com.facebook.presto.tests.AbstractTestQueries.TEST_SYSTEM_PROPERTIES;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -71,8 +74,8 @@ public final class StandaloneQueryRunner
         server.getMetadata().addFunctions(AbstractTestQueries.CUSTOM_FUNCTIONS);
 
         SessionPropertyManager sessionPropertyManager = server.getMetadata().getSessionPropertyManager();
-        sessionPropertyManager.addSystemSessionProperties(AbstractTestQueries.TEST_SYSTEM_PROPERTIES);
-        sessionPropertyManager.addConnectorSessionProperties("catalog", AbstractTestQueries.TEST_CATALOG_PROPERTIES);
+        sessionPropertyManager.addSystemSessionProperties(TEST_SYSTEM_PROPERTIES);
+        sessionPropertyManager.addConnectorSessionProperties(new ConnectorId("catalog"), TEST_CATALOG_PROPERTIES);
     }
 
     @Override
@@ -80,7 +83,7 @@ public final class StandaloneQueryRunner
     {
         lock.readLock().lock();
         try {
-            return prestoClient.execute(sql);
+            return prestoClient.execute(sql).getResult();
         }
         finally {
             lock.readLock().unlock();
@@ -92,7 +95,7 @@ public final class StandaloneQueryRunner
     {
         lock.readLock().lock();
         try {
-            return prestoClient.execute(session, sql);
+            return prestoClient.execute(session, sql).getResult();
         }
         finally {
             lock.readLock().unlock();
@@ -128,6 +131,12 @@ public final class StandaloneQueryRunner
     public Metadata getMetadata()
     {
         return server.getMetadata();
+    }
+
+    @Override
+    public CostCalculator getCostCalculator()
+    {
+        return server.getCostCalculator();
     }
 
     @Override
@@ -182,7 +191,7 @@ public final class StandaloneQueryRunner
 
     public void createCatalog(String catalogName, String connectorName)
     {
-        createCatalog(catalogName, connectorName, ImmutableMap.<String, String>of());
+        createCatalog(catalogName, connectorName, ImmutableMap.of());
     }
 
     public void createCatalog(String catalogName, String connectorName, Map<String, String> properties)
@@ -227,7 +236,7 @@ public final class StandaloneQueryRunner
     {
         ImmutableMap.Builder<String, String> properties = ImmutableMap.<String, String>builder()
                 .put("query.client.timeout", "10m")
-                .put("exchange.http-client.read-timeout", "1h")
+                .put("exchange.http-client.idle-timeout", "1h")
                 .put("compiler.interpreter-enabled", "false")
                 .put("node-scheduler.min-candidates", "1")
                 .put("datasources", "system");

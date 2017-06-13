@@ -15,7 +15,6 @@ package com.facebook.presto.sql.planner;
 
 import com.facebook.presto.Session;
 import com.facebook.presto.metadata.Metadata;
-import com.facebook.presto.metadata.Signature;
 import com.facebook.presto.metadata.TableHandle;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.predicate.TupleDomain;
@@ -23,9 +22,11 @@ import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.ExpressionUtils;
 import com.facebook.presto.sql.analyzer.Analysis;
 import com.facebook.presto.sql.analyzer.Field;
+import com.facebook.presto.sql.analyzer.RelationId;
 import com.facebook.presto.sql.analyzer.RelationType;
 import com.facebook.presto.sql.analyzer.Scope;
 import com.facebook.presto.sql.planner.plan.AggregationNode;
+import com.facebook.presto.sql.planner.plan.Assignments;
 import com.facebook.presto.sql.planner.plan.ExceptNode;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.IntersectNode;
@@ -38,20 +39,21 @@ import com.facebook.presto.sql.planner.plan.UnionNode;
 import com.facebook.presto.sql.planner.plan.UnnestNode;
 import com.facebook.presto.sql.planner.plan.ValuesNode;
 import com.facebook.presto.sql.tree.AliasedRelation;
-import com.facebook.presto.sql.tree.Approximate;
-import com.facebook.presto.sql.tree.ArithmeticBinaryExpression;
 import com.facebook.presto.sql.tree.Cast;
 import com.facebook.presto.sql.tree.CoalesceExpression;
 import com.facebook.presto.sql.tree.ComparisonExpression;
+import com.facebook.presto.sql.tree.ComparisonExpressionType;
 import com.facebook.presto.sql.tree.DefaultTraversalVisitor;
 import com.facebook.presto.sql.tree.Except;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.ExpressionTreeRewriter;
-import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.InPredicate;
 import com.facebook.presto.sql.tree.Intersect;
 import com.facebook.presto.sql.tree.Join;
+import com.facebook.presto.sql.tree.JoinUsing;
+import com.facebook.presto.sql.tree.LambdaArgumentDeclaration;
 import com.facebook.presto.sql.tree.LongLiteral;
+import com.facebook.presto.sql.tree.NodeRef;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.Query;
 import com.facebook.presto.sql.tree.QuerySpecification;
@@ -77,18 +79,17 @@ import com.google.common.collect.UnmodifiableIterator;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static com.facebook.presto.spi.type.BigintType.BIGINT;
-import static com.facebook.presto.sql.analyzer.SemanticExceptions.throwNotSupportedException;
+import static com.facebook.presto.sql.analyzer.SemanticExceptions.notSupportedException;
 import static com.facebook.presto.sql.planner.ExpressionInterpreter.evaluateConstantExpression;
 import static com.facebook.presto.sql.tree.Join.Type.INNER;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
-import static com.facebook.presto.util.Types.checkType;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.util.Objects.requireNonNull;
 
 class RelationPlanner
@@ -97,24 +98,33 @@ class RelationPlanner
     private final Analysis analysis;
     private final SymbolAllocator symbolAllocator;
     private final PlanNodeIdAllocator idAllocator;
+    private final Map<NodeRef<LambdaArgumentDeclaration>, Symbol> lambdaDeclarationToSymbolMap;
     private final Metadata metadata;
     private final Session session;
     private final SubqueryPlanner subqueryPlanner;
 
-    RelationPlanner(Analysis analysis, SymbolAllocator symbolAllocator, PlanNodeIdAllocator idAllocator, Metadata metadata, Session session)
+    RelationPlanner(
+            Analysis analysis,
+            SymbolAllocator symbolAllocator,
+            PlanNodeIdAllocator idAllocator,
+            Map<NodeRef<LambdaArgumentDeclaration>, Symbol> lambdaDeclarationToSymbolMap,
+            Metadata metadata,
+            Session session)
     {
         requireNonNull(analysis, "analysis is null");
         requireNonNull(symbolAllocator, "symbolAllocator is null");
         requireNonNull(idAllocator, "idAllocator is null");
+        requireNonNull(lambdaDeclarationToSymbolMap, "lambdaDeclarationToSymbolMap is null");
         requireNonNull(metadata, "metadata is null");
         requireNonNull(session, "session is null");
 
         this.analysis = analysis;
         this.symbolAllocator = symbolAllocator;
         this.idAllocator = idAllocator;
+        this.lambdaDeclarationToSymbolMap = lambdaDeclarationToSymbolMap;
         this.metadata = metadata;
         this.session = session;
-        this.subqueryPlanner = new SubqueryPlanner(analysis, symbolAllocator, idAllocator, metadata, session, analysis.getParameters());
+        this.subqueryPlanner = new SubqueryPlanner(analysis, symbolAllocator, idAllocator, lambdaDeclarationToSymbolMap, metadata, session, analysis.getParameters());
     }
 
     @Override
@@ -130,7 +140,7 @@ class RelationPlanner
             // of the view (e.g., if the underlying tables referenced by the view changed)
             Type[] types = scope.getRelationType().getAllFields().stream().map(Field::getType).toArray(Type[]::new);
             RelationPlan withCoercions = addCoercions(subPlan, types);
-            return new RelationPlan(withCoercions.getRoot(), scope, withCoercions.getOutputSymbols(), withCoercions.getSampleWeight());
+            return new RelationPlan(withCoercions.getRoot(), scope, withCoercions.getFieldMappings());
         }
 
         TableHandle handle = analysis.getTableHandle(node);
@@ -144,18 +154,9 @@ class RelationPlanner
             columns.put(symbol, analysis.getColumn(field));
         }
 
-        List<Symbol> planOutputSymbols = outputSymbolsBuilder.build();
-        Optional<ColumnHandle> sampleWeightColumn = metadata.getSampleWeightColumnHandle(session, handle);
-        Symbol sampleWeightSymbol = null;
-        if (sampleWeightColumn.isPresent()) {
-            sampleWeightSymbol = symbolAllocator.newSymbol("$sampleWeight", BIGINT);
-            outputSymbolsBuilder.add(sampleWeightSymbol);
-            columns.put(sampleWeightSymbol, sampleWeightColumn.get());
-        }
-
-        List<Symbol> nodeOutputSymbols = outputSymbolsBuilder.build();
-        PlanNode root = new TableScanNode(idAllocator.getNextId(), handle, nodeOutputSymbols, columns.build(), Optional.empty(), TupleDomain.all(), null);
-        return new RelationPlan(root, scope, planOutputSymbols, Optional.ofNullable(sampleWeightSymbol));
+        List<Symbol> outputSymbols = outputSymbolsBuilder.build();
+        PlanNode root = new TableScanNode(idAllocator.getNextId(), handle, outputSymbols, columns.build(), Optional.empty(), TupleDomain.all(), null);
+        return new RelationPlan(root, scope, outputSymbols);
     }
 
     @Override
@@ -163,30 +164,20 @@ class RelationPlanner
     {
         RelationPlan subPlan = process(node.getRelation(), context);
 
-        return new RelationPlan(subPlan.getRoot(), analysis.getScope(node), subPlan.getOutputSymbols(), subPlan.getSampleWeight());
+        return new RelationPlan(subPlan.getRoot(), analysis.getScope(node), subPlan.getFieldMappings());
     }
 
     @Override
     protected RelationPlan visitSampledRelation(SampledRelation node, Void context)
     {
-        if (node.getColumnsToStratifyOn().isPresent()) {
-            throw new UnsupportedOperationException("STRATIFY ON is not yet implemented");
-        }
-
         RelationPlan subPlan = process(node.getRelation(), context);
 
         double ratio = analysis.getSampleRatio(node);
-        Symbol sampleWeightSymbol = null;
-        if (node.getType() == SampledRelation.Type.POISSONIZED) {
-            sampleWeightSymbol = symbolAllocator.newSymbol("$sampleWeight", BIGINT);
-        }
         PlanNode planNode = new SampleNode(idAllocator.getNextId(),
                 subPlan.getRoot(),
                 ratio,
-                SampleNode.Type.fromType(node.getType()),
-                node.isRescaled(),
-                Optional.ofNullable(sampleWeightSymbol));
-        return new RelationPlan(planNode, analysis.getScope(node), subPlan.getOutputSymbols(), Optional.ofNullable(sampleWeightSymbol));
+                SampleNode.Type.fromType(node.getType()));
+        return new RelationPlan(planNode, analysis.getScope(node), subPlan.getFieldMappings());
     }
 
     @Override
@@ -205,7 +196,7 @@ class RelationPlanner
                 unnest = (Unnest) node.getRight();
             }
             if (node.getType() != Join.Type.CROSS && node.getType() != Join.Type.IMPLICIT) {
-                throwNotSupportedException(unnest, "UNNEST on other than the right side of CROSS JOIN");
+                throw notSupportedException(unnest, "UNNEST on other than the right side of CROSS JOIN");
             }
             return planCrossJoinUnnest(leftPlan, node, unnest);
         }
@@ -217,8 +208,8 @@ class RelationPlanner
 
         // NOTE: symbols must be in the same order as the outputDescriptor
         List<Symbol> outputSymbols = ImmutableList.<Symbol>builder()
-                .addAll(leftPlan.getOutputSymbols())
-                .addAll(rightPlan.getOutputSymbols())
+                .addAll(leftPlan.getFieldMappings())
+                .addAll(rightPlan.getFieldMappings())
                 .build();
 
         ImmutableList.Builder<JoinNode.EquiJoinClause> equiClauses = ImmutableList.builder();
@@ -233,7 +224,7 @@ class RelationPlanner
 
             List<Expression> leftComparisonExpressions = new ArrayList<>();
             List<Expression> rightComparisonExpressions = new ArrayList<>();
-            List<ComparisonExpression.Type> joinConditionComparisonTypes = new ArrayList<>();
+            List<ComparisonExpressionType> joinConditionComparisonTypes = new ArrayList<>();
 
             for (Expression conjunct : ExpressionUtils.extractConjuncts(criteria)) {
                 conjunct = ExpressionUtils.normalize(conjunct);
@@ -243,19 +234,29 @@ class RelationPlanner
                     continue;
                 }
 
-                if (conjunct instanceof ComparisonExpression) {
+                Set<QualifiedName> dependencies = DependencyExtractor.extractNames(conjunct, analysis.getColumnReferences());
+                boolean isJoinUsing = node.getCriteria().filter(JoinUsing.class::isInstance).isPresent();
+                if (!isJoinUsing && (dependencies.stream().allMatch(left::canResolve) || dependencies.stream().allMatch(right::canResolve))) {
+                    // If the conjunct can be evaluated entirely with the inputs on either side of the join, add
+                    // it to the list complex expressions and let the optimizers figure out how to push it down later.
+                    // Due to legacy reasons, the expression for "join using" looks like "x = x", which (incorrectly)
+                    // appears to fit the condition we're after. So we skip them.
+
+                    complexJoinExpressions.add(conjunct);
+                }
+                else if (conjunct instanceof ComparisonExpression) {
                     Expression firstExpression = ((ComparisonExpression) conjunct).getLeft();
                     Expression secondExpression = ((ComparisonExpression) conjunct).getRight();
-                    ComparisonExpression.Type comparisonType = ((ComparisonExpression) conjunct).getType();
+                    ComparisonExpressionType comparisonType = ((ComparisonExpression) conjunct).getType();
                     Set<QualifiedName> firstDependencies = DependencyExtractor.extractNames(firstExpression, analysis.getColumnReferences());
                     Set<QualifiedName> secondDependencies = DependencyExtractor.extractNames(secondExpression, analysis.getColumnReferences());
 
-                    if (firstDependencies.stream().allMatch(left.canResolvePredicate()) && secondDependencies.stream().allMatch(right.canResolvePredicate())) {
+                    if (firstDependencies.stream().allMatch(left::canResolve) && secondDependencies.stream().allMatch(right::canResolve)) {
                         leftComparisonExpressions.add(firstExpression);
                         rightComparisonExpressions.add(secondExpression);
                         joinConditionComparisonTypes.add(comparisonType);
                     }
-                    else if (firstDependencies.stream().allMatch(right.canResolvePredicate()) && secondDependencies.stream().allMatch(left.canResolvePredicate())) {
+                    else if (firstDependencies.stream().allMatch(right::canResolve) && secondDependencies.stream().allMatch(left::canResolve)) {
                         leftComparisonExpressions.add(secondExpression);
                         rightComparisonExpressions.add(firstExpression);
                         joinConditionComparisonTypes.add(comparisonType.flip());
@@ -278,7 +279,7 @@ class RelationPlanner
             rightPlanBuilder = rightPlanBuilder.appendProjections(rightComparisonExpressions, symbolAllocator, idAllocator);
 
             for (int i = 0; i < leftComparisonExpressions.size(); i++) {
-                if (joinConditionComparisonTypes.get(i) == ComparisonExpression.Type.EQUAL) {
+                if (joinConditionComparisonTypes.get(i) == ComparisonExpressionType.EQUAL) {
                     Symbol leftSymbol = leftPlanBuilder.translate(leftComparisonExpressions.get(i));
                     Symbol rightSymbol = rightPlanBuilder.translate(rightComparisonExpressions.get(i));
 
@@ -297,6 +298,11 @@ class RelationPlanner
                 leftPlanBuilder.getRoot(),
                 rightPlanBuilder.getRoot(),
                 equiClauses.build(),
+                ImmutableList.<Symbol>builder()
+                        .addAll(leftPlanBuilder.getRoot().getOutputSymbols())
+                        .addAll(rightPlanBuilder.getRoot().getOutputSymbols())
+                        .build(),
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
@@ -306,7 +312,7 @@ class RelationPlanner
                 Set<InPredicate> inPredicates = subqueryPlanner.collectInPredicateSubqueries(complexExpression, node);
                 if (!inPredicates.isEmpty()) {
                     InPredicate inPredicate = Iterables.getLast(inPredicates);
-                    throwNotSupportedException(inPredicate, "IN with subquery predicate in join condition");
+                    throw notSupportedException(inPredicate, "IN with subquery predicate in join condition");
                 }
             }
 
@@ -314,9 +320,8 @@ class RelationPlanner
             leftPlanBuilder = subqueryPlanner.handleUncorrelatedSubqueries(leftPlanBuilder, complexJoinExpressions, node);
         }
 
-        Optional<Symbol> sampleWeight = Optional.empty();
-        RelationPlan intermediateRootRelationPlan = new RelationPlan(root, analysis.getScope(node), outputSymbols, sampleWeight);
-        TranslationMap translationMap = new TranslationMap(intermediateRootRelationPlan, analysis);
+        RelationPlan intermediateRootRelationPlan = new RelationPlan(root, analysis.getScope(node), outputSymbols);
+        TranslationMap translationMap = new TranslationMap(intermediateRootRelationPlan, analysis, lambdaDeclarationToSymbolMap);
         translationMap.setFieldMappings(outputSymbols);
         translationMap.putExpressionMappingsFrom(leftPlanBuilder.getTranslations());
         translationMap.putExpressionMappingsFrom(rightPlanBuilder.getTranslations());
@@ -324,36 +329,29 @@ class RelationPlanner
         if (node.getType() != INNER && !complexJoinExpressions.isEmpty()) {
             Expression joinedFilterCondition = ExpressionUtils.and(complexJoinExpressions);
             joinedFilterCondition = ExpressionTreeRewriter.rewriteWith(new ParameterRewriter(analysis.getParameters(), analysis), joinedFilterCondition);
-            Expression rewritenFilterCondition = translationMap.rewrite(joinedFilterCondition);
+            Expression rewrittenFilterCondition = translationMap.rewrite(joinedFilterCondition);
             root = new JoinNode(idAllocator.getNextId(),
                     JoinNode.Type.typeConvert(node.getType()),
                     leftPlanBuilder.getRoot(),
                     rightPlanBuilder.getRoot(),
                     equiClauses.build(),
-                    Optional.of(rewritenFilterCondition),
+                    ImmutableList.<Symbol>builder()
+                            .addAll(leftPlanBuilder.getRoot().getOutputSymbols())
+                            .addAll(rightPlanBuilder.getRoot().getOutputSymbols())
+                            .build(),
+                    Optional.of(rewrittenFilterCondition),
+                    Optional.empty(),
                     Optional.empty(),
                     Optional.empty());
         }
 
-        if (leftPlanBuilder.getSampleWeight().isPresent() || rightPlanBuilder.getSampleWeight().isPresent()) {
-            Expression expression = new ArithmeticBinaryExpression(ArithmeticBinaryExpression.Type.MULTIPLY,
-                    oneIfNull(leftPlanBuilder.getSampleWeight()),
-                    oneIfNull(rightPlanBuilder.getSampleWeight()));
-            sampleWeight = Optional.of(symbolAllocator.newSymbol(expression, BIGINT));
-            ImmutableMap.Builder<Symbol, Expression> projections = ImmutableMap.builder();
-            projections.put(sampleWeight.get(), expression);
-            for (Symbol symbol : root.getOutputSymbols()) {
-                projections.put(symbol, symbol.toSymbolReference());
-            }
-            root = new ProjectNode(idAllocator.getNextId(), root, projections.build());
-        }
-
         if (node.getType() == INNER) {
             // rewrite all the other conditions using output symbols from left + right plan node.
-            PlanBuilder rootPlanBuilder = new PlanBuilder(translationMap, root, sampleWeight, analysis.getParameters());
+            PlanBuilder rootPlanBuilder = new PlanBuilder(translationMap, root, analysis.getParameters());
             rootPlanBuilder = subqueryPlanner.handleSubqueries(rootPlanBuilder, complexJoinExpressions, node);
 
             for (Expression expression : complexJoinExpressions) {
+                expression = ExpressionTreeRewriter.rewriteWith(new ParameterRewriter(analysis.getParameters(), analysis), expression);
                 postInnerJoinConditions.add(rootPlanBuilder.rewrite(expression));
             }
             root = rootPlanBuilder.getRoot();
@@ -365,12 +363,12 @@ class RelationPlanner
             }
         }
 
-        return new RelationPlan(root, analysis.getScope(node), outputSymbols, sampleWeight);
+        return new RelationPlan(root, analysis.getScope(node), outputSymbols);
     }
 
-    private boolean isEqualComparisonExpression(Expression conjunct)
+    private static boolean isEqualComparisonExpression(Expression conjunct)
     {
-        return conjunct instanceof ComparisonExpression && ((ComparisonExpression) conjunct).getType() == ComparisonExpression.Type.EQUAL;
+        return conjunct instanceof ComparisonExpression && ((ComparisonExpression) conjunct).getType() == ComparisonExpressionType.EQUAL;
     }
 
     private RelationPlan planCrossJoinUnnest(RelationPlan leftPlan, Join joinNode, Unnest node)
@@ -388,7 +386,7 @@ class RelationPlanner
         PlanBuilder planBuilder = initializePlanBuilder(leftPlan);
         planBuilder = planBuilder.appendProjections(node.getExpressions(), symbolAllocator, idAllocator);
         TranslationMap translations = planBuilder.getTranslations();
-        ProjectNode projectNode = checkType(planBuilder.getRoot(), ProjectNode.class, "planBuilder.getRoot()");
+        ProjectNode projectNode = (ProjectNode) planBuilder.getRoot();
 
         ImmutableMap.Builder<Symbol, List<Symbol>> unnestSymbols = ImmutableMap.builder();
         UnmodifiableIterator<Symbol> unnestedSymbolsIterator = unnestedSymbols.iterator();
@@ -408,8 +406,8 @@ class RelationPlanner
         Optional<Symbol> ordinalitySymbol = node.isWithOrdinality() ? Optional.of(unnestedSymbolsIterator.next()) : Optional.empty();
         checkState(!unnestedSymbolsIterator.hasNext(), "Not all output symbols were matched with input symbols");
 
-        UnnestNode unnestNode = new UnnestNode(idAllocator.getNextId(), projectNode, leftPlan.getOutputSymbols(), unnestSymbols.build(), ordinalitySymbol);
-        return new RelationPlan(unnestNode, analysis.getScope(joinNode), unnestNode.getOutputSymbols(), Optional.empty());
+        UnnestNode unnestNode = new UnnestNode(idAllocator.getNextId(), projectNode, leftPlan.getFieldMappings(), unnestSymbols.build(), ordinalitySymbol);
+        return new RelationPlan(unnestNode, analysis.getScope(joinNode), unnestNode.getOutputSymbols());
     }
 
     private static Expression oneIfNull(Optional<Symbol> symbol)
@@ -431,15 +429,14 @@ class RelationPlanner
     @Override
     protected RelationPlan visitQuery(Query node, Void context)
     {
-        Optional<Double> approximationConfidence = node.getApproximate().map(Approximate::getConfidence).map(confidence -> Double.valueOf(confidence) / 100.0);
-        return new QueryPlanner(analysis, symbolAllocator, idAllocator, metadata, session, approximationConfidence)
+        return new QueryPlanner(analysis, symbolAllocator, idAllocator, lambdaDeclarationToSymbolMap, metadata, session)
                 .plan(node);
     }
 
     @Override
     protected RelationPlan visitQuerySpecification(QuerySpecification node, Void context)
     {
-        return new QueryPlanner(analysis, symbolAllocator, idAllocator, metadata, session, Optional.empty())
+        return new QueryPlanner(analysis, symbolAllocator, idAllocator, lambdaDeclarationToSymbolMap, metadata, session)
                 .plan(node);
     }
 
@@ -475,7 +472,7 @@ class RelationPlanner
         }
 
         ValuesNode valuesNode = new ValuesNode(idAllocator.getNextId(), outputSymbolsBuilder.build(), rows.build());
-        return new RelationPlan(valuesNode, scope, outputSymbolsBuilder.build(), Optional.empty());
+        return new RelationPlan(valuesNode, scope, outputSymbolsBuilder.build());
     }
 
     @Override
@@ -513,10 +510,10 @@ class RelationPlanner
         }
         Optional<Symbol> ordinalitySymbol = node.isWithOrdinality() ? Optional.of(unnestedSymbolsIterator.next()) : Optional.empty();
         checkState(!unnestedSymbolsIterator.hasNext(), "Not all output symbols were matched with input symbols");
-        ValuesNode valuesNode = new ValuesNode(idAllocator.getNextId(), argumentSymbols.build(), ImmutableList.<List<Expression>>of(values.build()));
+        ValuesNode valuesNode = new ValuesNode(idAllocator.getNextId(), argumentSymbols.build(), ImmutableList.of(values.build()));
 
-        UnnestNode unnestNode = new UnnestNode(idAllocator.getNextId(), valuesNode, ImmutableList.<Symbol>of(), unnestSymbols.build(), ordinalitySymbol);
-        return new RelationPlan(unnestNode, scope, unnestedSymbols, Optional.empty());
+        UnnestNode unnestNode = new UnnestNode(idAllocator.getNextId(), valuesNode, ImmutableList.of(), unnestSymbols.build(), ordinalitySymbol);
+        return new RelationPlan(unnestNode, scope, unnestedSymbols);
     }
 
     private RelationPlan processAndCoerceIfNecessary(Relation node, Void context)
@@ -534,17 +531,17 @@ class RelationPlanner
 
     private RelationPlan addCoercions(RelationPlan plan, Type[] targetColumnTypes)
     {
-        List<Symbol> oldSymbols = plan.getOutputSymbols();
+        List<Symbol> oldSymbols = plan.getFieldMappings();
         RelationType oldDescriptor = plan.getDescriptor().withOnlyVisibleFields();
         verify(targetColumnTypes.length == oldSymbols.size());
         ImmutableList.Builder<Symbol> newSymbols = new ImmutableList.Builder<>();
         Field[] newFields = new Field[targetColumnTypes.length];
-        ImmutableMap.Builder<Symbol, Expression> assignments = new ImmutableMap.Builder<>();
+        Assignments.Builder assignments = Assignments.builder();
         for (int i = 0; i < targetColumnTypes.length; i++) {
             Symbol inputSymbol = oldSymbols.get(i);
             Type inputType = symbolAllocator.getTypes().get(inputSymbol);
             Type outputType = targetColumnTypes[i];
-            if (outputType != inputType && !metadata.getTypeManager().isTypeOnlyCoercion(inputType, outputType)) {
+            if (outputType != inputType) {
                 Expression cast = new Cast(inputSymbol.toSymbolReference(), outputType.getTypeSignature().toString());
                 Symbol outputSymbol = symbolAllocator.newSymbol(cast, outputType);
                 assignments.put(outputSymbol, cast);
@@ -557,10 +554,16 @@ class RelationPlanner
                 newSymbols.add(outputSymbol);
             }
             Field oldField = oldDescriptor.getFieldByIndex(i);
-            newFields[i] = new Field(oldField.getRelationAlias(), oldField.getName(), targetColumnTypes[i], oldField.isHidden());
+            newFields[i] = new Field(
+                    oldField.getRelationAlias(),
+                    oldField.getName(),
+                    targetColumnTypes[i],
+                    oldField.isHidden(),
+                    oldField.getOriginTable(),
+                    oldField.isAliased());
         }
         ProjectNode projectNode = new ProjectNode(idAllocator.getNextId(), plan.getRoot(), assignments.build());
-        return new RelationPlan(projectNode, Scope.builder().withRelationType(new RelationType(newFields)).build(), newSymbols.build(), plan.getSampleWeight());
+        return new RelationPlan(projectNode, Scope.builder().withRelationType(RelationId.anonymous(), new RelationType(newFields)).build(), newSymbols.build());
     }
 
     @Override
@@ -574,7 +577,7 @@ class RelationPlanner
         if (node.isDistinct()) {
             planNode = distinct(planNode);
         }
-        return new RelationPlan(planNode, analysis.getScope(node), planNode.getOutputSymbols(), setOperationPlan.getOutputSampleWeight());
+        return new RelationPlan(planNode, analysis.getScope(node), planNode.getOutputSymbols());
     }
 
     @Override
@@ -585,7 +588,7 @@ class RelationPlanner
         SetOperationPlan setOperationPlan = process(node);
 
         PlanNode planNode = new IntersectNode(idAllocator.getNextId(), setOperationPlan.getSources(), setOperationPlan.getSymbolMapping(), ImmutableList.copyOf(setOperationPlan.getSymbolMapping().keySet()));
-        return new RelationPlan(planNode, analysis.getScope(node), planNode.getOutputSymbols(), setOperationPlan.getOutputSampleWeight());
+        return new RelationPlan(planNode, analysis.getScope(node), planNode.getOutputSymbols());
     }
 
     @Override
@@ -596,7 +599,7 @@ class RelationPlanner
         SetOperationPlan setOperationPlan = process(node);
 
         PlanNode planNode = new ExceptNode(idAllocator.getNextId(), setOperationPlan.getSources(), setOperationPlan.getSymbolMapping(), ImmutableList.copyOf(setOperationPlan.getSymbolMapping().keySet()));
-        return new RelationPlan(planNode, analysis.getScope(node), planNode.getOutputSymbols(), setOperationPlan.getOutputSampleWeight());
+        return new RelationPlan(planNode, analysis.getScope(node), planNode.getOutputSymbols());
     }
 
     private SetOperationPlan process(SetOperation node)
@@ -609,21 +612,8 @@ class RelationPlanner
                 .map(relation -> processAndCoerceIfNecessary(relation, null))
                 .collect(toImmutableList());
 
-        boolean hasSampleWeight = false;
-        for (RelationPlan subPlan : subPlans) {
-            if (subPlan.getSampleWeight().isPresent()) {
-                hasSampleWeight = true;
-                break;
-            }
-        }
-
-        Optional<Symbol> outputSampleWeight = Optional.empty();
         for (RelationPlan relationPlan : subPlans) {
-            if (hasSampleWeight && !relationPlan.getSampleWeight().isPresent()) {
-                relationPlan = addConstantSampleWeight(relationPlan);
-            }
-
-            List<Symbol> childOutputSymbols = relationPlan.getOutputSymbols();
+            List<Symbol> childOutputSymbols = relationPlan.getFieldMappings();
             if (outputs == null) {
                 // Use the first Relation to derive output symbol names
                 RelationType descriptor = relationPlan.getDescriptor();
@@ -634,7 +624,6 @@ class RelationPlanner
                     outputSymbolBuilder.add(symbolAllocator.newSymbol(symbol.getName(), symbolAllocator.getTypes().get(symbol)));
                 }
                 outputs = outputSymbolBuilder.build();
-                outputSampleWeight = relationPlan.getSampleWeight();
             }
 
             RelationType descriptor = relationPlan.getDescriptor();
@@ -653,45 +642,29 @@ class RelationPlanner
             sources.add(relationPlan.getRoot());
         }
 
-        return new SetOperationPlan(sources.build(), symbolMapping.build(), outputSampleWeight);
-    }
-
-    private RelationPlan addConstantSampleWeight(RelationPlan subPlan)
-    {
-        ImmutableMap.Builder<Symbol, Expression> projections = ImmutableMap.builder();
-        for (Symbol symbol : subPlan.getOutputSymbols()) {
-            projections.put(symbol, symbol.toSymbolReference());
-        }
-        Expression one = new LongLiteral("1");
-
-        Symbol sampleWeightSymbol = symbolAllocator.newSymbol("$sampleWeight", BIGINT);
-        projections.put(sampleWeightSymbol, one);
-        ProjectNode projectNode = new ProjectNode(idAllocator.getNextId(), subPlan.getRoot(), projections.build());
-        return new RelationPlan(projectNode, subPlan.getScope(), projectNode.getOutputSymbols(), Optional.of(sampleWeightSymbol));
+        return new SetOperationPlan(sources.build(), symbolMapping.build());
     }
 
     private PlanBuilder initializePlanBuilder(RelationPlan relationPlan)
     {
-        TranslationMap translations = new TranslationMap(relationPlan, analysis);
+        TranslationMap translations = new TranslationMap(relationPlan, analysis, lambdaDeclarationToSymbolMap);
 
         // Make field->symbol mapping from underlying relation plan available for translations
         // This makes it possible to rewrite FieldOrExpressions that reference fields from the underlying tuple directly
-        translations.setFieldMappings(relationPlan.getOutputSymbols());
+        translations.setFieldMappings(relationPlan.getFieldMappings());
 
-        return new PlanBuilder(translations, relationPlan.getRoot(), relationPlan.getSampleWeight(), analysis.getParameters());
+        return new PlanBuilder(translations, relationPlan.getRoot(), analysis.getParameters());
     }
 
     private PlanNode distinct(PlanNode node)
     {
         return new AggregationNode(idAllocator.getNextId(),
                 node,
-                ImmutableMap.<Symbol, FunctionCall>of(),
-                ImmutableMap.<Symbol, Signature>of(),
-                ImmutableMap.<Symbol, Symbol>of(),
+                ImmutableMap.of(),
+                ImmutableMap.of(),
+                ImmutableMap.of(),
                 ImmutableList.of(node.getOutputSymbols()),
                 AggregationNode.Step.SINGLE,
-                Optional.empty(),
-                1.0,
                 Optional.empty(),
                 Optional.empty());
     }
@@ -700,13 +673,11 @@ class RelationPlanner
     {
         private final List<PlanNode> sources;
         private final ListMultimap<Symbol, Symbol> symbolMapping;
-        private final Optional<Symbol> outputSampleWeight;
 
-        private SetOperationPlan(List<PlanNode> sources, ListMultimap<Symbol, Symbol> symbolMapping, Optional<Symbol> outputSampleWeight)
+        private SetOperationPlan(List<PlanNode> sources, ListMultimap<Symbol, Symbol> symbolMapping)
         {
             this.sources = sources;
             this.symbolMapping = symbolMapping;
-            this.outputSampleWeight = outputSampleWeight;
         }
 
         public List<PlanNode> getSources()
@@ -717,11 +688,6 @@ class RelationPlanner
         public ListMultimap<Symbol, Symbol> getSymbolMapping()
         {
             return symbolMapping;
-        }
-
-        public Optional<Symbol> getOutputSampleWeight()
-        {
-            return outputSampleWeight;
         }
     }
 }

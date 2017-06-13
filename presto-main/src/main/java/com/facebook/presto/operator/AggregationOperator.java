@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.operator;
 
+import com.facebook.presto.memory.LocalMemoryContext;
 import com.facebook.presto.operator.aggregation.Accumulator;
 import com.facebook.presto.operator.aggregation.AccumulatorFactory;
 import com.facebook.presto.spi.Page;
@@ -25,9 +26,9 @@ import com.google.common.collect.ImmutableList;
 
 import java.util.List;
 
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -36,6 +37,8 @@ import static java.util.Objects.requireNonNull;
 public class AggregationOperator
         implements Operator
 {
+    private final boolean partial;
+
     public static class AggregationOperatorFactory
             implements OperatorFactory
     {
@@ -90,6 +93,7 @@ public class AggregationOperator
     }
 
     private final OperatorContext operatorContext;
+    private final LocalMemoryContext systemMemoryContext;
     private final List<Type> types;
     private final List<Aggregator> aggregates;
 
@@ -98,10 +102,12 @@ public class AggregationOperator
     public AggregationOperator(OperatorContext operatorContext, Step step, List<AccumulatorFactory> accumulatorFactories)
     {
         this.operatorContext = requireNonNull(operatorContext, "operatorContext is null");
+        this.systemMemoryContext = operatorContext.getSystemMemoryContext().newLocalMemoryContext();
 
         requireNonNull(step, "step is null");
-        requireNonNull(accumulatorFactories, "accumulatorFactories is null");
+        this.partial = step.isOutputPartial();
 
+        requireNonNull(accumulatorFactories, "accumulatorFactories is null");
         this.types = toTypes(step, accumulatorFactories);
 
         // wrapper each function with an aggregator
@@ -155,8 +161,12 @@ public class AggregationOperator
             aggregate.processPage(page);
             memorySize += aggregate.getEstimatedSize();
         }
-        memorySize -= operatorContext.getOperatorPreAllocatedMemory().toBytes();
-        operatorContext.setMemoryReservation(Math.max(0, memorySize));
+        if (partial) {
+            systemMemoryContext.setBytes(memorySize);
+        }
+        else {
+            operatorContext.setMemoryReservation(memorySize);
+        }
     }
 
     @Override
@@ -199,23 +209,21 @@ public class AggregationOperator
 
         private Aggregator(AccumulatorFactory accumulatorFactory, Step step)
         {
-            checkArgument(step != Step.INTERMEDIATE, "intermediate aggregation not supported");
-
-            if (step == Step.FINAL) {
+            if (step.isInputRaw()) {
+                intermediateChannel = -1;
+                aggregation = accumulatorFactory.createAccumulator();
+            }
+            else {
                 checkArgument(accumulatorFactory.getInputChannels().size() == 1, "expected 1 input channel for intermediate aggregation");
                 intermediateChannel = accumulatorFactory.getInputChannels().get(0);
                 aggregation = accumulatorFactory.createIntermediateAccumulator();
-            }
-            else {
-                intermediateChannel = -1;
-                aggregation = accumulatorFactory.createAccumulator();
             }
             this.step = step;
         }
 
         public Type getType()
         {
-            if (step == Step.PARTIAL) {
+            if (step.isOutputPartial()) {
                 return aggregation.getIntermediateType();
             }
             else {
@@ -225,17 +233,17 @@ public class AggregationOperator
 
         public void processPage(Page page)
         {
-            if (step == Step.FINAL) {
-                aggregation.addIntermediate(page.getBlock(intermediateChannel));
+            if (step.isInputRaw()) {
+                aggregation.addInput(page);
             }
             else {
-                aggregation.addInput(page);
+                aggregation.addIntermediate(page.getBlock(intermediateChannel));
             }
         }
 
         public void evaluate(BlockBuilder blockBuilder)
         {
-            if (step == Step.PARTIAL) {
+            if (step.isOutputPartial()) {
                 aggregation.evaluateIntermediate(blockBuilder);
             }
             else {

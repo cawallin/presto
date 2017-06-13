@@ -20,23 +20,29 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.Warehouse;
+import org.apache.hadoop.hive.metastore.api.ColumnStatisticsObj;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
+import org.apache.hadoop.hive.metastore.api.HiveObjectPrivilege;
 import org.apache.hadoop.hive.metastore.api.HiveObjectRef;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
-import org.apache.hadoop.hive.metastore.api.PrincipalPrivilegeSet;
 import org.apache.hadoop.hive.metastore.api.PrincipalType;
 import org.apache.hadoop.hive.metastore.api.PrivilegeBag;
 import org.apache.hadoop.hive.metastore.api.Role;
+import org.apache.hadoop.hive.metastore.api.RolePrincipalGrant;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.thrift.TException;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.apache.hadoop.hive.metastore.api.PrincipalType.ROLE;
+import static org.apache.hadoop.hive.metastore.api.PrincipalType.USER;
 
 public class MockHiveMetastoreClient
         implements HiveMetastoreClient
@@ -48,6 +54,10 @@ public class MockHiveMetastoreClient
     static final String TEST_PARTITION2 = "key=testpartition2";
     static final List<String> TEST_PARTITION_VALUES1 = ImmutableList.of("testpartition1");
     static final List<String> TEST_PARTITION_VALUES2 = ImmutableList.of("testpartition2");
+    static final List<String> TEST_ROLES = ImmutableList.of("testrole");
+    static final List<RolePrincipalGrant> TEST_ROLE_GRANTS = ImmutableList.of(
+            new RolePrincipalGrant("role1", "user", USER, false, 0, "grantor1", USER),
+            new RolePrincipalGrant("role2", "role1", ROLE, true, 0, "grantor2", ROLE));
 
     private static final StorageDescriptor DEFAULT_STORAGE_DESCRIPTOR =
             new StorageDescriptor(ImmutableList.of(), "", null, null, false, 0, new SerDeInfo(TEST_TABLE, null, ImmutableMap.of()), null, null, ImmutableMap.of());
@@ -128,6 +138,20 @@ public class MockHiveMetastoreClient
                 "",
                 "",
                 TableType.MANAGED_TABLE.name());
+    }
+
+    @Override
+    public List<ColumnStatisticsObj> getTableColumnStatistics(String databaseName, String tableName, List<String> columnNames)
+            throws TException
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Map<String, List<ColumnStatisticsObj>> getPartitionColumnStatistics(String databaseName, String tableName, List<String> columnNames, List<String> partitionValues)
+            throws TException
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -261,7 +285,8 @@ public class MockHiveMetastoreClient
     }
 
     @Override
-    public PrincipalPrivilegeSet getPrivilegeSet(HiveObjectRef hiveObject, String userName, List<String> groupNames)
+    public List<HiveObjectPrivilege> listPrivileges(String principalName, PrincipalType principalType, HiveObjectRef hiveObjectRef)
+            throws TException
     {
         throw new UnsupportedOperationException();
     }
@@ -269,7 +294,25 @@ public class MockHiveMetastoreClient
     @Override
     public List<String> getRoleNames()
     {
-        throw new UnsupportedOperationException();
+        accessCount.incrementAndGet();
+        if (throwException) {
+            throw new IllegalStateException();
+        }
+        return TEST_ROLES;
+    }
+
+    @Override
+    public void createRole(String role, String grantor)
+            throws TException
+    {
+        // No-op
+    }
+
+    @Override
+    public void dropRole(String role)
+            throws TException
+    {
+        // No-op
     }
 
     @Override
@@ -282,6 +325,31 @@ public class MockHiveMetastoreClient
     public boolean revokePrivileges(PrivilegeBag privilegeBag)
     {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void grantRole(String role, String granteeName, PrincipalType granteeType, String grantorName, PrincipalType grantorType, boolean grantOption)
+            throws TException
+    {
+        // No-op
+    }
+
+    @Override
+    public void revokeRole(String role, String granteeName, PrincipalType granteeType, boolean grantOption)
+            throws TException
+    {
+        // No-op
+    }
+
+    @Override
+    public List<RolePrincipalGrant> listRoleGrants(String name, PrincipalType principalType)
+            throws TException
+    {
+        accessCount.incrementAndGet();
+        if (throwException) {
+            throw new IllegalStateException();
+        }
+        return TEST_ROLE_GRANTS;
     }
 
     @Override

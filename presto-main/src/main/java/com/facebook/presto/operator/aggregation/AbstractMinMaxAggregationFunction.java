@@ -49,8 +49,8 @@ import static com.facebook.presto.operator.aggregation.AggregationUtils.generate
 import static com.facebook.presto.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.facebook.presto.util.Reflection.methodHandle;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.util.Objects.requireNonNull;
 
 public abstract class AbstractMinMaxAggregationFunction
@@ -75,8 +75,6 @@ public abstract class AbstractMinMaxAggregationFunction
     private static final MethodHandle BLOCK_COMBINE_FUNCTION = methodHandle(AbstractMinMaxAggregationFunction.class, "combine", MethodHandle.class, BlockState.class, BlockState.class);
 
     private final OperatorType operatorType;
-
-    private final StateCompiler compiler = new StateCompiler();
 
     protected AbstractMinMaxAggregationFunction(String name, OperatorType operatorType)
     {
@@ -111,28 +109,28 @@ public abstract class AbstractMinMaxAggregationFunction
 
         if (type.getJavaType() == long.class) {
             stateInterface = NullableLongState.class;
-            stateSerializer = compiler.generateStateSerializer(stateInterface, classLoader);
+            stateSerializer = StateCompiler.generateStateSerializer(stateInterface, classLoader);
             inputFunction = LONG_INPUT_FUNCTION;
             combineFunction = LONG_COMBINE_FUNCTION;
             outputFunction = LONG_OUTPUT_FUNCTION;
         }
         else if (type.getJavaType() == double.class) {
             stateInterface = NullableDoubleState.class;
-            stateSerializer = compiler.generateStateSerializer(stateInterface, classLoader);
+            stateSerializer = StateCompiler.generateStateSerializer(stateInterface, classLoader);
             inputFunction = DOUBLE_INPUT_FUNCTION;
             combineFunction = DOUBLE_COMBINE_FUNCTION;
             outputFunction = DOUBLE_OUTPUT_FUNCTION;
         }
         else if (type.getJavaType() == Slice.class) {
             stateInterface = SliceState.class;
-            stateSerializer = compiler.generateStateSerializer(stateInterface, classLoader);
+            stateSerializer = StateCompiler.generateStateSerializer(stateInterface, classLoader);
             inputFunction = SLICE_INPUT_FUNCTION;
             combineFunction = SLICE_COMBINE_FUNCTION;
             outputFunction = SLICE_OUTPUT_FUNCTION;
         }
         else if (type.getJavaType() == boolean.class) {
             stateInterface = NullableBooleanState.class;
-            stateSerializer = compiler.generateStateSerializer(stateInterface, classLoader);
+            stateSerializer = StateCompiler.generateStateSerializer(stateInterface, classLoader);
             inputFunction = BOOLEAN_INPUT_FUNCTION;
             combineFunction = BOOLEAN_COMBINE_FUNCTION;
             outputFunction = BOOLEAN_OUTPUT_FUNCTION;
@@ -149,7 +147,7 @@ public abstract class AbstractMinMaxAggregationFunction
         combineFunction = combineFunction.bindTo(compareMethodHandle);
         outputFunction = outputFunction.bindTo(type);
 
-        AccumulatorStateFactory<?> stateFactory = compiler.generateStateFactory(stateInterface, classLoader);
+        AccumulatorStateFactory<?> stateFactory = StateCompiler.generateStateFactory(stateInterface, classLoader);
 
         Type intermediateType = stateSerializer.getSerializedType();
         AggregationMetadata metadata = new AggregationMetadata(
@@ -161,11 +159,10 @@ public abstract class AbstractMinMaxAggregationFunction
                 stateInterface,
                 stateSerializer,
                 stateFactory,
-                type,
-                false);
+                type);
 
-        GenericAccumulatorFactoryBinder factory = new AccumulatorCompiler().generateAccumulatorFactoryBinder(metadata, classLoader);
-        return new InternalAggregationFunction(getSignature().getName(), inputTypes, intermediateType, type, true, false, factory);
+        GenericAccumulatorFactoryBinder factory = AccumulatorCompiler.generateAccumulatorFactoryBinder(metadata, classLoader);
+        return new InternalAggregationFunction(getSignature().getName(), inputTypes, intermediateType, type, true, factory);
     }
 
     private static List<ParameterMetadata> createParameterMetadata(Type type)

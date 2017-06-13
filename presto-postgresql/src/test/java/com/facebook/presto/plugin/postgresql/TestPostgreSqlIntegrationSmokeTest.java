@@ -24,7 +24,6 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 
-import static io.airlift.testing.Closeables.closeAllRuntimeException;
 import static io.airlift.tpch.TpchTable.ORDERS;
 import static org.testng.Assert.assertTrue;
 
@@ -43,21 +42,15 @@ public class TestPostgreSqlIntegrationSmokeTest
     public TestPostgreSqlIntegrationSmokeTest(TestingPostgreSqlServer postgreSqlServer)
             throws Exception
     {
-        super(PostgreSqlQueryRunner.createPostgreSqlQueryRunner(postgreSqlServer, ORDERS));
+        super(() -> PostgreSqlQueryRunner.createPostgreSqlQueryRunner(postgreSqlServer, ORDERS));
         this.postgreSqlServer = postgreSqlServer;
-    }
-
-    @Override
-    public void testViewAccessControl()
-    {
-        // jdbc connector does not support views
     }
 
     @AfterClass(alwaysRun = true)
     public final void destroy()
             throws IOException
     {
-        closeAllRuntimeException(postgreSqlServer);
+        postgreSqlServer.close();
     }
 
     @Test
@@ -75,7 +68,7 @@ public class TestPostgreSqlIntegrationSmokeTest
             throws Exception
     {
         execute("CREATE MATERIALIZED VIEW tpch.test_mv as SELECT * FROM tpch.orders");
-        assertTrue(queryRunner.tableExists(getSession(), "test_mv"));
+        assertTrue(getQueryRunner().tableExists(getSession(), "test_mv"));
         assertQuery("SELECT orderkey FROM test_mv", "SELECT orderkey FROM orders");
         execute("DROP MATERIALIZED VIEW tpch.test_mv");
     }

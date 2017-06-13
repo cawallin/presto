@@ -15,15 +15,14 @@ package com.facebook.presto.sql.gen;
 
 import com.facebook.presto.bytecode.BytecodeBlock;
 import com.facebook.presto.bytecode.BytecodeNode;
-import com.facebook.presto.bytecode.MethodDefinition;
 import com.facebook.presto.bytecode.Scope;
 import com.facebook.presto.metadata.FunctionRegistry;
 import com.facebook.presto.sql.relational.CallExpression;
 import com.facebook.presto.sql.relational.ConstantExpression;
 import com.facebook.presto.sql.relational.InputReferenceExpression;
+import com.facebook.presto.sql.relational.LambdaDefinitionExpression;
 import com.facebook.presto.sql.relational.RowExpressionVisitor;
-
-import java.util.Map;
+import com.facebook.presto.sql.relational.VariableReferenceExpression;
 
 import static com.facebook.presto.bytecode.expression.BytecodeExpressions.constantTrue;
 import static com.facebook.presto.bytecode.instruction.Constant.loadBoolean;
@@ -33,6 +32,7 @@ import static com.facebook.presto.bytecode.instruction.Constant.loadInt;
 import static com.facebook.presto.bytecode.instruction.Constant.loadLong;
 import static com.facebook.presto.bytecode.instruction.Constant.loadString;
 import static com.facebook.presto.sql.gen.BytecodeUtils.loadConstant;
+import static com.facebook.presto.sql.relational.Signatures.BIND;
 import static com.facebook.presto.sql.relational.Signatures.CAST;
 import static com.facebook.presto.sql.relational.Signatures.COALESCE;
 import static com.facebook.presto.sql.relational.Signatures.DEREFERENCE;
@@ -43,28 +43,29 @@ import static com.facebook.presto.sql.relational.Signatures.NULL_IF;
 import static com.facebook.presto.sql.relational.Signatures.ROW_CONSTRUCTOR;
 import static com.facebook.presto.sql.relational.Signatures.SWITCH;
 import static com.facebook.presto.sql.relational.Signatures.TRY;
+import static com.google.common.base.Preconditions.checkState;
 
 public class BytecodeExpressionVisitor
-        implements RowExpressionVisitor<Scope, BytecodeNode>
+        implements RowExpressionVisitor<BytecodeNode, Scope>
 {
     private final CallSiteBinder callSiteBinder;
     private final CachedInstanceBinder cachedInstanceBinder;
-    private final RowExpressionVisitor<Scope, BytecodeNode> fieldReferenceCompiler;
+    private final RowExpressionVisitor<BytecodeNode, Scope> fieldReferenceCompiler;
     private final FunctionRegistry registry;
-    private final Map<CallExpression, MethodDefinition> tryExpressionsMap;
+    private final PreGeneratedExpressions preGeneratedExpressions;
 
     public BytecodeExpressionVisitor(
             CallSiteBinder callSiteBinder,
             CachedInstanceBinder cachedInstanceBinder,
-            RowExpressionVisitor<Scope, BytecodeNode> fieldReferenceCompiler,
+            RowExpressionVisitor<BytecodeNode, Scope> fieldReferenceCompiler,
             FunctionRegistry registry,
-            Map<CallExpression, MethodDefinition> tryExpressionsMap)
+            PreGeneratedExpressions preGeneratedExpressions)
     {
         this.callSiteBinder = callSiteBinder;
         this.cachedInstanceBinder = cachedInstanceBinder;
         this.fieldReferenceCompiler = fieldReferenceCompiler;
         this.registry = registry;
-        this.tryExpressionsMap = tryExpressionsMap;
+        this.preGeneratedExpressions = preGeneratedExpressions;
     }
 
     @Override
@@ -89,14 +90,11 @@ public class BytecodeExpressionVisitor
                     generator = new SwitchCodeGenerator();
                     break;
                 case TRY:
-                    generator = new TryCodeGenerator(tryExpressionsMap);
+                    generator = new TryCodeGenerator(preGeneratedExpressions.getTryMethodMap());
                     break;
                 // functions that take null as input
                 case IS_NULL:
                     generator = new IsNullCodeGenerator();
-                    break;
-                case "IS_DISTINCT_FROM":
-                    generator = new IsDistinctFromCodeGenerator();
                     break;
                 case COALESCE:
                     generator = new CoalesceCodeGenerator();
@@ -117,6 +115,9 @@ public class BytecodeExpressionVisitor
                     break;
                 case ROW_CONSTRUCTOR:
                     generator = new RowConstructorCodeGenerator();
+                    break;
+                case BIND:
+                    generator = new BindCodeGenerator();
                     break;
                 default:
                     generator = new FunctionCallCodeGenerator();
@@ -183,5 +184,19 @@ public class BytecodeExpressionVisitor
     public BytecodeNode visitInputReference(InputReferenceExpression node, Scope scope)
     {
         return fieldReferenceCompiler.visitInputReference(node, scope);
+    }
+
+    @Override
+    public BytecodeNode visitLambda(LambdaDefinitionExpression lambda, Scope scope)
+    {
+        checkState(preGeneratedExpressions.getLambdaFieldMap().containsKey(lambda), "lambda expressions map does not contain this lambda definition");
+
+        return scope.getThis().getField(preGeneratedExpressions.getLambdaFieldMap().get(lambda).getInstanceField());
+    }
+
+    @Override
+    public BytecodeNode visitVariableReference(VariableReferenceExpression reference, Scope scope)
+    {
+        return fieldReferenceCompiler.visitVariableReference(reference, scope);
     }
 }

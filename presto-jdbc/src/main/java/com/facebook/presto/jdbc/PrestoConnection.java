@@ -16,6 +16,8 @@ package com.facebook.presto.jdbc;
 import com.facebook.presto.client.ClientSession;
 import com.facebook.presto.client.ServerInfo;
 import com.facebook.presto.client.StatementClient;
+import com.facebook.presto.spi.security.SelectedRole;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.units.Duration;
 
@@ -62,16 +64,19 @@ public class PrestoConnection
     private final AtomicReference<String> schema = new AtomicReference<>();
     private final AtomicReference<String> timeZoneId = new AtomicReference<>();
     private final AtomicReference<Locale> locale = new AtomicReference<>();
+    private final AtomicReference<ServerInfo> serverInfo = new AtomicReference<>();
 
     private final URI jdbcUri;
     private final URI httpUri;
     private final String user;
     private final Map<String, String> clientInfo = new ConcurrentHashMap<>();
     private final Map<String, String> sessionProperties = new ConcurrentHashMap<>();
+    private final Map<String, SelectedRole> roles = new ConcurrentHashMap<>();
     private final AtomicReference<String> transactionId = new AtomicReference<>();
     private final QueryExecutor queryExecutor;
+    private final Runnable onClose;
 
-    PrestoConnection(PrestoDriverUri uri, String user, QueryExecutor queryExecutor)
+    PrestoConnection(PrestoConnectionConfig uri, String user, QueryExecutor queryExecutor, Runnable onClose)
             throws SQLException
     {
         requireNonNull(uri, "uri is null");
@@ -82,6 +87,8 @@ public class PrestoConnection
 
         this.user = requireNonNull(user, "user is null");
         this.queryExecutor = requireNonNull(queryExecutor, "queryExecutor is null");
+        this.onClose = requireNonNull(onClose, "onClose is null");
+
         timeZoneId.set(TimeZone.getDefault().getID());
         locale.set(Locale.getDefault());
     }
@@ -161,6 +168,7 @@ public class PrestoConnection
     public void close()
             throws SQLException
     {
+        onClose.run();
         closed.set(true);
     }
 
@@ -516,6 +524,20 @@ public class PrestoConnection
         sessionProperties.put(name, value);
     }
 
+    void setRole(String catalog, SelectedRole role)
+    {
+        requireNonNull(catalog, "catalog is null");
+        requireNonNull(role, "role is null");
+
+        roles.put(catalog, role);
+    }
+
+    @VisibleForTesting
+    Map<String, SelectedRole> getRoles()
+    {
+        return ImmutableMap.copyOf(roles);
+    }
+
     @Override
     public void abort(Executor executor)
             throws SQLException
@@ -566,8 +588,17 @@ public class PrestoConnection
     }
 
     ServerInfo getServerInfo()
+            throws SQLException
     {
-        return queryExecutor.getServerInfo(httpUri);
+        if (serverInfo.get() == null) {
+            try {
+                serverInfo.set(queryExecutor.getServerInfo(httpUri));
+            }
+            catch (RuntimeException e) {
+                throw new SQLException("Error fetching version from server", e);
+            }
+        }
+        return serverInfo.get();
     }
 
     StatementClient startQuery(String sql)
@@ -578,11 +609,14 @@ public class PrestoConnection
                 httpUri,
                 user,
                 source,
+                clientInfo.get("ClientInfo"),
                 catalog.get(),
                 schema.get(),
                 timeZoneId.get(),
                 locale.get(),
                 ImmutableMap.copyOf(sessionProperties),
+                ImmutableMap.of(),
+                ImmutableMap.copyOf(roles),
                 transactionId.get(),
                 false,
                 new Duration(2, MINUTES));

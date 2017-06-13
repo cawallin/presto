@@ -11,7 +11,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.facebook.presto.sql.planner.optimizations;
 
 import com.facebook.presto.metadata.FunctionKind;
@@ -21,12 +20,13 @@ import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
 import com.facebook.presto.sql.planner.plan.AggregationNode;
+import com.facebook.presto.sql.planner.plan.Assignments;
 import com.facebook.presto.sql.planner.plan.ProjectNode;
 import com.facebook.presto.sql.planner.plan.ValuesNode;
 import com.facebook.presto.sql.tree.FunctionCall;
+import com.facebook.presto.sql.tree.Identifier;
 import com.facebook.presto.sql.tree.LongLiteral;
 import com.facebook.presto.sql.tree.QualifiedName;
-import com.facebook.presto.sql.tree.QualifiedNameReference;
 import com.facebook.presto.sql.tree.SymbolReference;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -58,14 +58,12 @@ public class TestCountConstantOptimizer
                         new ProjectNode(
                                 planNodeIdAllocator.getNextId(),
                                 valuesNode,
-                                ImmutableMap.of(new Symbol("expr"), new LongLiteral("42"))),
+                                Assignments.of(new Symbol("expr"), new LongLiteral("42"))),
                         aggregations,
                         functions,
                         ImmutableMap.of(),
                         ImmutableList.of(ImmutableList.of()),
                         AggregationNode.Step.INTERMEDIATE,
-                        Optional.empty(),
-                        1.0,
                         Optional.empty(),
                         Optional.empty());
 
@@ -80,14 +78,12 @@ public class TestCountConstantOptimizer
                         new ProjectNode(
                                 planNodeIdAllocator.getNextId(),
                                 valuesNode,
-                                ImmutableMap.of(new Symbol("expr"), new FunctionCall(QualifiedName.of("function"), ImmutableList.of(new QualifiedNameReference(QualifiedName.of("x")))))),
+                                Assignments.of(new Symbol("expr"), new FunctionCall(QualifiedName.of("function"), ImmutableList.of(new Identifier("x"))))),
                         aggregations,
                         functions,
                         ImmutableMap.of(),
                         ImmutableList.of(ImmutableList.of()),
                         AggregationNode.Step.INTERMEDIATE,
-                        Optional.empty(),
-                        1.0,
                         Optional.empty(),
                         Optional.empty());
 

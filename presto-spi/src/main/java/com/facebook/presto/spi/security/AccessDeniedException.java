@@ -16,6 +16,7 @@ package com.facebook.presto.spi.security;
 import com.facebook.presto.spi.PrestoException;
 
 import java.security.Principal;
+import java.util.Set;
 
 import static com.facebook.presto.spi.StandardErrorCode.PERMISSION_DENIED;
 import static java.lang.String.format;
@@ -36,6 +37,16 @@ public class AccessDeniedException
     public static void denySetUser(Principal principal, String userName, String extraInfo)
     {
         throw new AccessDeniedException(format("Principal %s cannot become user %s%s", principal, userName, formatExtraInfo(extraInfo)));
+    }
+
+    public static void denyCatalogAccess(String catalogName)
+    {
+        denyCatalogAccess(catalogName, null);
+    }
+
+    public static void denyCatalogAccess(String catalogName, String extraInfo)
+    {
+        throw new AccessDeniedException(format("Cannot access catalog %s%s", catalogName, formatExtraInfo(extraInfo)));
     }
 
     public static void denyCreateSchema(String schemaName)
@@ -68,6 +79,16 @@ public class AccessDeniedException
         throw new AccessDeniedException(format("Cannot rename schema from %s to %s%s", schemaName, newSchemaName, formatExtraInfo(extraInfo)));
     }
 
+    public static void denyShowSchemas()
+    {
+        denyShowSchemas(null);
+    }
+
+    public static void denyShowSchemas(String extraInfo)
+    {
+        throw new AccessDeniedException(format("Cannot show schemas%s", formatExtraInfo(extraInfo)));
+    }
+
     public static void denyCreateTable(String tableName)
     {
         denyCreateTable(tableName, null);
@@ -96,6 +117,16 @@ public class AccessDeniedException
     public static void denyRenameTable(String tableName, String newTableName, String extraInfo)
     {
         throw new AccessDeniedException(format("Cannot rename table from %s to %s%s", tableName, newTableName, formatExtraInfo(extraInfo)));
+    }
+
+    public static void denyShowTablesMetadata(String schemaName)
+    {
+        denyShowTablesMetadata(schemaName, null);
+    }
+
+    public static void denyShowTablesMetadata(String schemaName, String extraInfo)
+    {
+        throw new AccessDeniedException(format("Cannot show metadata of tables in %s%s", schemaName, formatExtraInfo(extraInfo)));
     }
 
     public static void denyAddColumn(String tableName)
@@ -208,6 +239,21 @@ public class AccessDeniedException
         throw new AccessDeniedException(format("Cannot revoke privilege %s on table %s%s", privilege, tableName, formatExtraInfo(extraInfo)));
     }
 
+    public static void denyShowRoles(String catalogName)
+    {
+        throw new AccessDeniedException(format("Cannot show roles from catalog %s", catalogName));
+    }
+
+    public static void denyShowCurrentRoles(String catalogName)
+    {
+        throw new AccessDeniedException(format("Cannot show current roles from catalog %s", catalogName));
+    }
+
+    public static void denyShowRoleGrants(String catalogName)
+    {
+        throw new AccessDeniedException(format("Cannot show role grants from catalog %s", catalogName));
+    }
+
     public static void denySetSystemSessionProperty(String propertyName)
     {
         denySetSystemSessionProperty(propertyName, null);
@@ -231,6 +277,31 @@ public class AccessDeniedException
     public static void denySetCatalogSessionProperty(String propertyName)
     {
         throw new AccessDeniedException(format("Cannot set catalog session property %s", propertyName));
+    }
+
+    public static void denyCreateRole(String roleName)
+    {
+        throw new AccessDeniedException(format("Cannot create role %s", roleName));
+    }
+
+    public static void denyDropRole(String roleName)
+    {
+        throw new AccessDeniedException(format("Cannot drop role %s", roleName));
+    }
+
+    public static void denyGrantRoles(Set<String> roles, Set<PrestoPrincipal> grantees)
+    {
+        throw new AccessDeniedException(format("Cannot grant roles %s to %s ", roles, grantees));
+    }
+
+    public static void denyRevokeRoles(Set<String> roles, Set<PrestoPrincipal> grantees)
+    {
+        throw new AccessDeniedException(format("Cannot revoke roles %s from %s ", roles, grantees));
+    }
+
+    public static void denySetRole(String role)
+    {
+        throw new AccessDeniedException(format("Cannot set role %s", role));
     }
 
     private static Object formatExtraInfo(String extraInfo)

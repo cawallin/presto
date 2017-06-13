@@ -39,6 +39,7 @@ import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.RealType.REAL;
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
+import static com.facebook.presto.util.StructuralTestUtil.mapType;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
 
@@ -50,7 +51,7 @@ public class TestRealHistogramAggregation
     public TestRealHistogramAggregation()
     {
         TypeRegistry typeRegistry = new TypeRegistry();
-        FunctionRegistry functionRegistry = new FunctionRegistry(typeRegistry, new BlockEncodingManager(typeRegistry), new FeaturesConfig().setExperimentalSyntaxEnabled(true));
+        FunctionRegistry functionRegistry = new FunctionRegistry(typeRegistry, new BlockEncodingManager(typeRegistry), new FeaturesConfig());
         InternalAggregationFunction function = functionRegistry.getAggregateFunctionImplementation(
                 new Signature("numeric_histogram",
                         AGGREGATE,
@@ -58,7 +59,7 @@ public class TestRealHistogramAggregation
                         parseTypeSignature(StandardTypes.BIGINT),
                         parseTypeSignature(StandardTypes.REAL),
                         parseTypeSignature(StandardTypes.DOUBLE)));
-        factory = function.bind(ImmutableList.of(0, 1, 2), Optional.empty(), Optional.empty(), 1.0);
+        factory = function.bind(ImmutableList.of(0, 1, 2), Optional.empty());
 
         input = makeInput(10);
     }
@@ -127,11 +128,11 @@ public class TestRealHistogramAggregation
     private static Map<Float, Float> extractSingleValue(Block block)
             throws IOException
     {
-        MapType mapType = new MapType(REAL, REAL);
+        MapType mapType = mapType(REAL, REAL);
         return (Map<Float, Float>) mapType.getObjectValue(null, block, 0);
     }
 
-    private Page makeInput(int numberOfBuckets)
+    private static Page makeInput(int numberOfBuckets)
     {
         PageBuilder builder = new PageBuilder(ImmutableList.of(BIGINT, REAL, DOUBLE));
 

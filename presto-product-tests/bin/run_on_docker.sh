@@ -36,13 +36,16 @@ function stop_unnecessary_hadoop_services() {
 }
 
 function run_in_application_runner_container() {
-  environment_compose run --rm -T application-runner "$@"
+  local CONTAINER_NAME=$( environment_compose run -d application-runner "$@" )
+  echo "Showing logs from $CONTAINER_NAME:"
+  docker logs -f $CONTAINER_NAME
+  return $( docker inspect --format '{{.State.ExitCode}}' $CONTAINER_NAME )
 }
 
 function check_presto() {
   run_in_application_runner_container \
     java -jar "/docker/volumes/presto-cli/presto-cli-executable.jar" \
-    --server presto-master:8080 \
+    ${CLI_ARGUMENTS} \
     --execute "SHOW CATALOGS" | grep -i hive
 }
 
@@ -52,7 +55,9 @@ function run_product_tests() {
   mkdir -p "${REPORT_DIR}"
   run_in_application_runner_container \
     java "-Djava.util.logging.config.file=/docker/volumes/conf/tempto/logging.properties" \
-    -jar "/docker/volumes/presto-product-tests/presto-product-tests-executable.jar" \
+    ${TLS_CERTIFICATE} \
+    -classpath "/docker/volumes/jdbc/driver.jar:/docker/volumes/presto-product-tests/presto-product-tests-executable.jar" \
+    com.facebook.presto.tests.TemptoProductTestRunner \
     --report-dir "/docker/volumes/test-reports" \
     --config-local "/docker/volumes/tempto/tempto-configuration-local.yaml" \
     "$@" \
@@ -77,6 +82,12 @@ function stop_application_runner_containers() {
     docker stop ${CONTAINER_NAME}
     echo "Container stopped: ${CONTAINER_NAME}"
   done
+  echo "Removing dead application-runner containers"
+  local CONTAINERS=`docker ps -aq --no-trunc --filter status=dead --filter status=exited --filter name=common_application-runner`
+  for CONTAINER in ${CONTAINERS};
+  do
+    docker rm -v "${CONTAINER}"
+  done
 }
 
 function stop_all_containers() {
@@ -96,19 +107,25 @@ function stop_docker_compose_containers() {
     stop_application_runner_containers ${ENVIRONMENT}
 
     # stop containers started with "up", removing their volumes
-    environment_compose down -v
+    # Some containers (SQL Server) fail to stop on Travis after running the tests. We don't have an easy way to
+    # reproduce this locally. Since all the tests complete successfully, we ignore this failure.
+    environment_compose down -v || true
   fi
 
   echo "Docker compose containers stopped: [$ENVIRONMENT]"
 }
 
 function prefetch_images_silently() {
-  local IMAGES=`environment_compose config | grep 'image:' | awk '{ print $2 }' | sort | uniq`
+  local IMAGES=$( docker_images_used )
   for IMAGE in $IMAGES
   do
     echo "Pulling docker image [$IMAGE]"
     docker pull $IMAGE > /dev/null
   done
+}
+
+function docker_images_used() {
+  environment_compose config | grep 'image:' | awk '{ print $2 }' | sort | uniq
 }
 
 function environment_compose() {
@@ -165,6 +182,22 @@ shift 1
 PRESTO_SERVICES="presto-master"
 if [[ "$ENVIRONMENT" == "multinode" ]]; then
    PRESTO_SERVICES="${PRESTO_SERVICES} presto-worker"
+elif [[ "$ENVIRONMENT" == "multinode-tls-ldap" ]]; then
+   PRESTO_SERVICES="${PRESTO_SERVICES} presto-worker-1 presto-worker-2 ldapserver"
+elif [[ "$ENVIRONMENT" == "multinode-tls-kerberos" ]]; then
+   PRESTO_SERVICES="${PRESTO_SERVICES} presto-worker-1 presto-worker-2"
+fi
+
+CLI_ARGUMENTS="--server presto-master:8080"
+if [[ "$ENVIRONMENT" == "multinode-tls-ldap" ]]; then
+    CLI_ARGUMENTS="--server https://presto-master.docker.cluster:7778 --keystore-path /docker/volumes/conf/presto/etc/docker.cluster.jks --keystore-password 123456 --user admin -P admin"
+elif [[ "$ENVIRONMENT" == "multinode-tls-kerberos" ]]; then
+    CLI_ARGUMENTS="--server https://presto-master.docker.cluster:7778 --keystore-path /docker/volumes/conf/presto/etc/docker.cluster.jks --keystore-password 123456 --enable-authentication --krb5-config-path /etc/krb5.conf --krb5-principal presto-client/presto-master.docker.cluster@LABS.TERADATA.COM --krb5-keytab-path /etc/presto/conf/presto-client.keytab --krb5-remote-service-name presto-server --krb5-disable-remote-service-hostname-canonicalization"
+fi
+
+TLS_CERTIFICATE=""
+if [[ "$ENVIRONMENT" == "multinode-tls" ]]; then
+    TLS_CERTIFICATE="-Djavax.net.ssl.keyStore=/docker/volumes/conf/presto/etc/docker.cluster.jks -Djavax.net.ssl.keyStorePassword=123456"
 fi
 
 # check docker and docker compose installation
@@ -175,20 +208,35 @@ stop_all_containers
 
 if [[ "$CONTINUOUS_INTEGRATION" == 'true' ]]; then
     prefetch_images_silently
+    # This has to be done after fetching the images
+    # or will present stale / no data for images that changed.
+    echo "Docker images versions:"
+    docker_images_used | xargs -n 1 docker inspect --format='ID: {{.ID}}, tags: {{.RepoTags}}'
 fi
 
 # catch terminate signals
 trap terminate INT TERM EXIT
 
-# start hadoop container
-environment_compose up -d hadoop-master
+# start external services
+# Tempto fails if cassandra is not running. It will
+# be removed from the list of EXTERNAL_SERVICES for
+# singlenode-sqlserver once we resolve
+# https://github.com/prestodb/tempto/issues/190
+if [[ "$ENVIRONMENT" == "singlenode-sqlserver" ]]; then
+  EXTERNAL_SERVICES="hadoop-master cassandra sqlserver"
+else
+  EXTERNAL_SERVICES="hadoop-master mysql postgres cassandra"
+fi
+environment_compose up -d ${EXTERNAL_SERVICES}
 
-# start external database containers
-environment_compose up -d mysql
-environment_compose up -d postgres
+# start docker logs for the external services
+environment_compose logs --no-color -f ${EXTERNAL_SERVICES} &
 
-# start docker logs for hadoop container
-environment_compose logs --no-color hadoop-master &
+# start ldap container
+if [[ "$ENVIRONMENT" == "singlenode-ldap" ]]; then
+  environment_compose up -d ldapserver
+fi
+
 HADOOP_LOGS_PID=$!
 
 # wait until hadoop processes is started
@@ -199,7 +247,7 @@ stop_unnecessary_hadoop_services
 environment_compose up -d ${PRESTO_SERVICES}
 
 # start docker logs for presto containers
-environment_compose logs --no-color ${PRESTO_SERVICES} &
+environment_compose logs --no-color -f ${PRESTO_SERVICES} &
 PRESTO_LOGS_PID=$!
 
 # wait until presto is started
@@ -207,7 +255,7 @@ retry check_presto
 
 # run product tests
 set +e
-run_product_tests "$*"
+run_product_tests "$@"
 EXIT_CODE=$?
 set -e
 

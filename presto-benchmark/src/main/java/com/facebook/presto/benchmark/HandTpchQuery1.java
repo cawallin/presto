@@ -114,18 +114,19 @@ public class HandTpchQuery1
                 ImmutableList.of(),
                 Step.SINGLE,
                 ImmutableList.of(
-                        doubleSum.bind(ImmutableList.of(2), Optional.empty(), Optional.empty(), 1.0),
-                        doubleSum.bind(ImmutableList.of(3), Optional.empty(), Optional.empty(), 1.0),
-                        doubleSum.bind(ImmutableList.of(4), Optional.empty(), Optional.empty(), 1.0),
-                        longAverage.bind(ImmutableList.of(2), Optional.empty(), Optional.empty(), 1.0),
-                        doubleAverage.bind(ImmutableList.of(5), Optional.empty(), Optional.empty(), 1.0),
-                        doubleAverage.bind(ImmutableList.of(6), Optional.empty(), Optional.empty(), 1.0),
-                        countFunction.bind(ImmutableList.of(2), Optional.empty(), Optional.empty(), 1.0)
+                        doubleSum.bind(ImmutableList.of(2), Optional.empty()),
+                        doubleSum.bind(ImmutableList.of(3), Optional.empty()),
+                        doubleSum.bind(ImmutableList.of(4), Optional.empty()),
+                        longAverage.bind(ImmutableList.of(2), Optional.empty()),
+                        doubleAverage.bind(ImmutableList.of(5), Optional.empty()),
+                        doubleAverage.bind(ImmutableList.of(6), Optional.empty()),
+                        countFunction.bind(ImmutableList.of(2), Optional.empty())
                         ),
                 Optional.empty(),
                 Optional.empty(),
                 10_000,
-                new DataSize(16, MEGABYTE));
+                new DataSize(16, MEGABYTE),
+                JOIN_COMPILER);
 
         return ImmutableList.of(tableScanOperator, tpchQuery1Operator, aggregationOperator);
     }
@@ -133,7 +134,7 @@ public class HandTpchQuery1
     public static class TpchQuery1Operator
             implements com.facebook.presto.operator.Operator // TODO: use import when Java 7 compiler bug is fixed
     {
-        private static final ImmutableList<Type> TYPES = ImmutableList.<Type>of(
+        private static final ImmutableList<Type> TYPES = ImmutableList.of(
                 VARCHAR,
                 VARCHAR,
                 DOUBLE,

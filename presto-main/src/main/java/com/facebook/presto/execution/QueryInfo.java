@@ -19,6 +19,7 @@ import com.facebook.presto.spi.ErrorCode;
 import com.facebook.presto.spi.ErrorType;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.memory.MemoryPoolId;
+import com.facebook.presto.spi.security.SelectedRole;
 import com.facebook.presto.transaction.TransactionId;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -53,6 +54,7 @@ public class QueryInfo
     private final QueryStats queryStats;
     private final Map<String, String> setSessionProperties;
     private final Set<String> resetSessionProperties;
+    private final Map<String, SelectedRole> setRoles;
     private final Map<String, String> addedPreparedStatements;
     private final Set<String> deallocatedPreparedStatements;
     private final Optional<TransactionId> startedTransactionId;
@@ -65,6 +67,7 @@ public class QueryInfo
     private final Set<Input> inputs;
     private final Optional<Output> output;
     private final boolean completeInfo;
+    private final Optional<String> resourceGroupName;
 
     @JsonCreator
     public QueryInfo(
@@ -79,6 +82,7 @@ public class QueryInfo
             @JsonProperty("queryStats") QueryStats queryStats,
             @JsonProperty("setSessionProperties") Map<String, String> setSessionProperties,
             @JsonProperty("resetSessionProperties") Set<String> resetSessionProperties,
+            @JsonProperty("setRoles") Map<String, SelectedRole> setRoles,
             @JsonProperty("addedPreparedStatements") Map<String, String> addedPreparedStatements,
             @JsonProperty("deallocatedPreparedStatements") Set<String> deallocatedPreparedStatements,
             @JsonProperty("startedTransactionId") Optional<TransactionId> startedTransactionId,
@@ -89,7 +93,8 @@ public class QueryInfo
             @JsonProperty("errorCode") ErrorCode errorCode,
             @JsonProperty("inputs") Set<Input> inputs,
             @JsonProperty("output") Optional<Output> output,
-            @JsonProperty("completeInfo") boolean completeInfo)
+            @JsonProperty("completeInfo") boolean completeInfo,
+            @JsonProperty("resourceGroupName") Optional<String> resourceGroupName)
     {
         requireNonNull(queryId, "queryId is null");
         requireNonNull(session, "session is null");
@@ -106,6 +111,7 @@ public class QueryInfo
         requireNonNull(outputStage, "outputStage is null");
         requireNonNull(inputs, "inputs is null");
         requireNonNull(output, "output is null");
+        requireNonNull(resourceGroupName, "resourceGroupName is null");
 
         this.queryId = queryId;
         this.session = session;
@@ -118,6 +124,7 @@ public class QueryInfo
         this.queryStats = queryStats;
         this.setSessionProperties = ImmutableMap.copyOf(setSessionProperties);
         this.resetSessionProperties = ImmutableSet.copyOf(resetSessionProperties);
+        this.setRoles = ImmutableMap.copyOf(setRoles);
         this.addedPreparedStatements = ImmutableMap.copyOf(addedPreparedStatements);
         this.deallocatedPreparedStatements = ImmutableSet.copyOf(deallocatedPreparedStatements);
         this.startedTransactionId = startedTransactionId;
@@ -130,6 +137,7 @@ public class QueryInfo
         this.inputs = ImmutableSet.copyOf(inputs);
         this.output = output;
         this.completeInfo = completeInfo;
+        this.resourceGroupName = resourceGroupName;
     }
 
     @JsonProperty
@@ -196,6 +204,12 @@ public class QueryInfo
     public Set<String> getResetSessionProperties()
     {
         return resetSessionProperties;
+    }
+
+    @JsonProperty
+    public Map<String, SelectedRole> getSetRoles()
+    {
+        return setRoles;
     }
 
     @JsonProperty
@@ -272,6 +286,12 @@ public class QueryInfo
     public Optional<Output> getOutput()
     {
         return output;
+    }
+
+    @JsonProperty
+    public Optional<String> getResourceGroupName()
+    {
+        return resourceGroupName;
     }
 
     @Override

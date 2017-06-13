@@ -34,7 +34,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static com.facebook.presto.spi.type.StandardTypes.ROW;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
+import static com.facebook.presto.type.TypeUtils.hashPosition;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -180,6 +181,12 @@ public class RowType
     }
 
     @Override
+    public boolean isOrderable()
+    {
+        return fields.stream().allMatch(field -> field.getType().isOrderable());
+    }
+
+    @Override
     public boolean equalTo(Block leftBlock, int leftPosition, Block rightBlock, int rightPosition)
     {
         Block leftRow = leftBlock.getObject(leftPosition, Block.class);
@@ -198,14 +205,35 @@ public class RowType
     }
 
     @Override
+    public int compareTo(Block leftBlock, int leftPosition, Block rightBlock, int rightPosition)
+    {
+        Block leftRow = leftBlock.getObject(leftPosition, Block.class);
+        Block rightRow = rightBlock.getObject(rightPosition, Block.class);
+
+        for (int i = 0; i < leftRow.getPositionCount(); i++) {
+            checkElementNotNull(leftRow.isNull(i));
+            checkElementNotNull(rightRow.isNull(i));
+            Type fieldType = fields.get(i).getType();
+            if (!fieldType.isOrderable()) {
+                throw new UnsupportedOperationException(fieldType.getTypeSignature() + " type is not orderable");
+            }
+            int compareResult = fieldType.compareTo(leftRow, i, rightRow, i);
+            if (compareResult != 0) {
+                return compareResult;
+            }
+        }
+
+        return 0;
+    }
+
+    @Override
     public long hash(Block block, int position)
     {
         Block arrayBlock = block.getObject(position, Block.class);
         long result = 1;
         for (int i = 0; i < arrayBlock.getPositionCount(); i++) {
-            checkElementNotNull(arrayBlock.isNull(i));
             Type elementType = fields.get(i).getType();
-            result = 31 * result + elementType.hash(arrayBlock, i);
+            result = 31 * result + hashPosition(elementType, arrayBlock, i);
         }
         return result;
     }

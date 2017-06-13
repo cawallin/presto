@@ -13,9 +13,11 @@
  */
 package com.facebook.presto;
 
+import com.facebook.presto.connector.ConnectorId;
 import com.facebook.presto.metadata.SessionPropertyManager;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.security.Identity;
+import com.facebook.presto.spi.security.SelectedRole;
 import com.facebook.presto.spi.type.TimeZoneKey;
 import com.facebook.presto.transaction.TransactionId;
 import com.fasterxml.jackson.annotation.JsonCreator;
@@ -43,9 +45,11 @@ public final class SessionRepresentation
     private final Locale locale;
     private final Optional<String> remoteUserAddress;
     private final Optional<String> userAgent;
+    private final Optional<String> clientInfo;
     private final long startTime;
     private final Map<String, String> systemProperties;
-    private final Map<String, Map<String, String>> catalogProperties;
+    private final Map<ConnectorId, Map<String, String>> catalogProperties;
+    private final Map<String, SelectedRole> roles;
     private final Map<String, String> preparedStatements;
 
     @JsonCreator
@@ -62,9 +66,11 @@ public final class SessionRepresentation
             @JsonProperty("locale") Locale locale,
             @JsonProperty("remoteUserAddress") Optional<String> remoteUserAddress,
             @JsonProperty("userAgent") Optional<String> userAgent,
+            @JsonProperty("clientInfo") Optional<String> clientInfo,
             @JsonProperty("startTime") long startTime,
             @JsonProperty("systemProperties") Map<String, String> systemProperties,
-            @JsonProperty("catalogProperties") Map<String, Map<String, String>> catalogProperties,
+            @JsonProperty("catalogProperties") Map<ConnectorId, Map<String, String>> catalogProperties,
+            @JsonProperty("roles") Map<String, SelectedRole> roles,
             @JsonProperty("preparedStatements") Map<String, String> preparedStatements)
     {
         this.queryId = requireNonNull(queryId, "queryId is null");
@@ -79,12 +85,14 @@ public final class SessionRepresentation
         this.locale = requireNonNull(locale, "locale is null");
         this.remoteUserAddress = requireNonNull(remoteUserAddress, "remoteUserAddress is null");
         this.userAgent = requireNonNull(userAgent, "userAgent is null");
+        this.clientInfo = requireNonNull(clientInfo, "clientInfo is null");
         this.startTime = startTime;
         this.systemProperties = ImmutableMap.copyOf(systemProperties);
+        this.roles = ImmutableMap.copyOf(roles);
         this.preparedStatements = ImmutableMap.copyOf(preparedStatements);
 
-        ImmutableMap.Builder<String, Map<String, String>> catalogPropertiesBuilder = ImmutableMap.<String, Map<String, String>>builder();
-        for (Entry<String, Map<String, String>> entry : catalogProperties.entrySet()) {
+        ImmutableMap.Builder<ConnectorId, Map<String, String>> catalogPropertiesBuilder = ImmutableMap.builder();
+        for (Entry<ConnectorId, Map<String, String>> entry : catalogProperties.entrySet()) {
             catalogPropertiesBuilder.put(entry.getKey(), ImmutableMap.copyOf(entry.getValue()));
         }
         this.catalogProperties = catalogPropertiesBuilder.build();
@@ -163,6 +171,12 @@ public final class SessionRepresentation
     }
 
     @JsonProperty
+    public Optional<String> getClientInfo()
+    {
+        return clientInfo;
+    }
+
+    @JsonProperty
     public long getStartTime()
     {
         return startTime;
@@ -175,9 +189,15 @@ public final class SessionRepresentation
     }
 
     @JsonProperty
-    public Map<String, Map<String, String>> getCatalogProperties()
+    public Map<ConnectorId, Map<String, String>> getCatalogProperties()
     {
         return catalogProperties;
+    }
+
+    @JsonProperty
+    public Map<String, SelectedRole> getRoles()
+    {
+        return roles;
     }
 
     @JsonProperty
@@ -192,7 +212,7 @@ public final class SessionRepresentation
                 new QueryId(queryId),
                 transactionId,
                 clientTransactionSupport,
-                new Identity(user, Optional.empty()),
+                new Identity(user, Optional.empty(), roles),
                 source,
                 catalog,
                 schema,
@@ -200,9 +220,11 @@ public final class SessionRepresentation
                 locale,
                 remoteUserAddress,
                 userAgent,
+                clientInfo,
                 startTime,
                 systemProperties,
                 catalogProperties,
+                ImmutableMap.of(),
                 sessionPropertyManager,
                 preparedStatements);
     }

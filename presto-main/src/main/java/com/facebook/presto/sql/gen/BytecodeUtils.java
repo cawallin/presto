@@ -199,6 +199,9 @@ public final class BytecodeUtils
                 }
                 else {
                     if (function.getNullFlags().get(realParameterIndex)) {
+                        if (type == Void.class) {
+                            block.append(boxPrimitiveIfNecessary(scope, type));
+                        }
                         block.append(scope.getVariable("wasNull"));
                         stackTypes.add(boolean.class);
                         currentParameterIndex++;
@@ -297,12 +300,12 @@ public final class BytecodeUtils
                 .ifFalse(notNull);
     }
 
-    public static BytecodeNode invoke(Binding binding, String name)
+    public static BytecodeExpression invoke(Binding binding, String name)
     {
         return invokeDynamic(BOOTSTRAP_METHOD, ImmutableList.of(binding.getBindingId()), name, binding.getType());
     }
 
-    public static BytecodeNode invoke(Binding binding, Signature signature)
+    public static BytecodeExpression invoke(Binding binding, Signature signature)
     {
         return invoke(binding, signature.getName());
     }

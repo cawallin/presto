@@ -14,29 +14,27 @@
 package com.facebook.presto.hive;
 
 import com.facebook.presto.Session;
-import com.facebook.presto.hive.metastore.BridgingHiveMetastore;
-import com.facebook.presto.hive.metastore.InMemoryHiveMetastore;
+import com.facebook.presto.hive.authentication.NoHdfsAuthentication;
+import com.facebook.presto.hive.metastore.Database;
+import com.facebook.presto.hive.metastore.file.FileHiveMetastore;
 import com.facebook.presto.metadata.QualifiedObjectName;
+import com.facebook.presto.spi.security.Identity;
+import com.facebook.presto.spi.security.PrincipalType;
 import com.facebook.presto.testing.QueryRunner;
 import com.facebook.presto.tests.DistributedQueryRunner;
 import com.facebook.presto.tpch.TpchPlugin;
-import com.facebook.presto.tpch.testing.SampledTpchPlugin;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import io.airlift.log.Logger;
 import io.airlift.log.Logging;
 import io.airlift.tpch.TpchTable;
-import org.apache.hadoop.hive.metastore.api.Database;
-import org.apache.hadoop.hive.metastore.api.PrincipalType;
 import org.intellij.lang.annotations.Language;
 import org.joda.time.DateTimeZone;
 
 import java.io.File;
 import java.util.Map;
+import java.util.Optional;
 
-import static com.facebook.presto.hive.security.SqlStandardAccessControl.ADMIN_ROLE_NAME;
-import static com.facebook.presto.hive.util.Types.checkType;
 import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
 import static com.facebook.presto.tests.QueryAssertions.copyTpchTables;
 import static com.facebook.presto.tpch.TpchMetadata.TINY_SCHEMA_NAME;
@@ -57,7 +55,6 @@ public final class HiveQueryRunner
     public static final String HIVE_CATALOG = "hive";
     public static final String HIVE_BUCKETED_CATALOG = "hive_bucketed";
     public static final String TPCH_SCHEMA = "tpch";
-    private static final String TPCH_SAMPLED_SCHEMA = "tpch_sampled";
     private static final String TPCH_BUCKETED_SCHEMA = "tpch_bucketed";
     private static final DateTimeZone TIME_ZONE = DateTimeZone.forID("Asia/Kathmandu");
 
@@ -90,24 +87,24 @@ public final class HiveQueryRunner
             queryRunner.installPlugin(new TpchPlugin());
             queryRunner.createCatalog("tpch", "tpch");
 
-            queryRunner.installPlugin(new SampledTpchPlugin());
-            queryRunner.createCatalog("tpch_sampled", "tpch_sampled");
-
             File baseDir = queryRunner.getCoordinator().getBaseDataDir().resolve("hive_data").toFile();
-            InMemoryHiveMetastore metastore = new InMemoryHiveMetastore(baseDir);
-            metastore.setUserRoles(createSession().getUser(), ImmutableSet.of(ADMIN_ROLE_NAME));
-            metastore.createDatabase(createDatabaseMetastoreObject(baseDir, TPCH_SCHEMA));
-            metastore.createDatabase(createDatabaseMetastoreObject(baseDir, TPCH_SAMPLED_SCHEMA));
-            metastore.createDatabase(createDatabaseMetastoreObject(baseDir, TPCH_BUCKETED_SCHEMA));
-            queryRunner.installPlugin(new HivePlugin(HIVE_CATALOG, new BridgingHiveMetastore(metastore)));
 
-            metastore.setUserRoles(createSession().getUser(), ImmutableSet.of("admin"));
+            HiveClientConfig hiveClientConfig = new HiveClientConfig();
+            HiveS3Config s3Config = new HiveS3Config();
+            HdfsConfiguration hdfsConfiguration = new HiveHdfsConfiguration(new HdfsConfigurationUpdater(hiveClientConfig, s3Config));
+            HdfsEnvironment hdfsEnvironment = new HdfsEnvironment(hdfsConfiguration, hiveClientConfig, new NoHdfsAuthentication());
+
+            FileHiveMetastore metastore = new FileHiveMetastore(hdfsEnvironment, baseDir.toURI().toString(), "test");
+            metastore.createDatabase(createDatabaseMetastoreObject(TPCH_SCHEMA));
+            metastore.createDatabase(createDatabaseMetastoreObject(TPCH_BUCKETED_SCHEMA));
+            queryRunner.installPlugin(new HivePlugin(HIVE_CATALOG, metastore));
 
             Map<String, String> hiveProperties = ImmutableMap.<String, String>builder()
                     .putAll(extraHiveProperties)
                     .put("hive.metastore.uri", "thrift://localhost:8080")
                     .put("hive.time-zone", TIME_ZONE.getID())
                     .put("hive.security", security)
+                    .put("hive.max-partitions-per-scan", "1000")
                     .build();
             Map<String, String> hiveBucketedProperties = ImmutableMap.<String, String>builder()
                     .putAll(hiveProperties)
@@ -120,7 +117,6 @@ public final class HiveQueryRunner
             queryRunner.createCatalog(HIVE_BUCKETED_CATALOG, HIVE_CATALOG, hiveBucketedProperties);
 
             copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, createSession(), tables);
-            copyTpchTables(queryRunner, "tpch_sampled", TINY_SCHEMA_NAME, createSampledSession(), tables);
             copyTpchTablesBucketed(queryRunner, "tpch", TINY_SCHEMA_NAME, createBucketedSession(), tables);
 
             return queryRunner;
@@ -131,33 +127,28 @@ public final class HiveQueryRunner
         }
     }
 
-    private static Database createDatabaseMetastoreObject(File baseDir, String name)
+    private static Database createDatabaseMetastoreObject(String name)
     {
-        Database database = new Database(name, null, new File(baseDir, name).toURI().toString(), null);
-        database.setOwnerName("public");
-        database.setOwnerType(PrincipalType.ROLE);
-        return database;
+        return Database.builder()
+                .setDatabaseName(name)
+                .setOwnerName("public")
+                .setOwnerType(PrincipalType.ROLE)
+                .build();
     }
 
     public static Session createSession()
     {
         return testSessionBuilder()
+                .setIdentity(new Identity("hive", Optional.empty()))
                 .setCatalog(HIVE_CATALOG)
                 .setSchema(TPCH_SCHEMA)
-                .build();
-    }
-
-    public static Session createSampledSession()
-    {
-        return testSessionBuilder()
-                .setCatalog(HIVE_CATALOG)
-                .setSchema(TPCH_SAMPLED_SCHEMA)
                 .build();
     }
 
     public static Session createBucketedSession()
     {
         return testSessionBuilder()
+                .setIdentity(new Identity("hive", Optional.empty()))
                 .setCatalog(HIVE_BUCKETED_CATALOG)
                 .setSchema(TPCH_BUCKETED_SCHEMA)
                 .build();
@@ -204,7 +195,7 @@ public final class HiveQueryRunner
             default:
                 throw new UnsupportedOperationException();
         }
-        long rows = checkType(queryRunner.execute(session, sql).getMaterializedRows().get(0).getField(0), Long.class, "rows");
+        long rows = (Long) queryRunner.execute(session, sql).getMaterializedRows().get(0).getField(0);
         log.info("Imported %s rows for %s in %s", rows, table.getObjectName(), nanosSince(start).convertToMostSuccinctTimeUnit());
     }
 

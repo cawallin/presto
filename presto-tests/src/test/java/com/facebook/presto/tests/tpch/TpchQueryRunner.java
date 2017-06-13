@@ -17,7 +17,6 @@ import com.facebook.presto.Session;
 import com.facebook.presto.sql.parser.SqlParserOptions;
 import com.facebook.presto.tests.DistributedQueryRunner;
 import com.facebook.presto.tpch.TpchPlugin;
-import com.facebook.presto.tpch.testing.SampledTpchPlugin;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.log.Logger;
 import io.airlift.log.Logging;
@@ -45,6 +44,21 @@ public final class TpchQueryRunner
     public static DistributedQueryRunner createQueryRunner(Map<String, String> extraProperties, Map<String, String> coordinatorProperties)
             throws Exception
     {
+        DistributedQueryRunner queryRunner = createQueryRunnerWithoutCatalogs(extraProperties, coordinatorProperties);
+        try {
+            queryRunner.createCatalog("tpch", "tpch");
+
+            return queryRunner;
+        }
+        catch (Exception e) {
+            queryRunner.close();
+            throw e;
+        }
+    }
+
+    public static DistributedQueryRunner createQueryRunnerWithoutCatalogs(Map<String, String> extraProperties, Map<String, String> coordinatorProperties)
+            throws Exception
+    {
         Session session = testSessionBuilder()
                 .setSource("test")
                 .setCatalog("tpch")
@@ -55,10 +69,6 @@ public final class TpchQueryRunner
 
         try {
             queryRunner.installPlugin(new TpchPlugin());
-            queryRunner.createCatalog("tpch", "tpch");
-
-            queryRunner.installPlugin(new SampledTpchPlugin());
-            queryRunner.createCatalog("tpch_sampled", "tpch_sampled");
 
             return queryRunner;
         }

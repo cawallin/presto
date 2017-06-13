@@ -19,23 +19,27 @@ import com.facebook.presto.SystemSessionProperties;
 import com.facebook.presto.block.BlockEncodingManager;
 import com.facebook.presto.block.BlockJsonSerde;
 import com.facebook.presto.client.NodeVersion;
-import com.facebook.presto.client.ServerInfo;
 import com.facebook.presto.connector.ConnectorManager;
 import com.facebook.presto.connector.system.SystemConnectorModule;
+import com.facebook.presto.cost.CoefficientBasedCostCalculator;
+import com.facebook.presto.cost.CostCalculator;
 import com.facebook.presto.event.query.QueryMonitor;
 import com.facebook.presto.event.query.QueryMonitorConfig;
 import com.facebook.presto.execution.LocationFactory;
+import com.facebook.presto.execution.MemoryRevokingScheduler;
 import com.facebook.presto.execution.NodeTaskMap;
 import com.facebook.presto.execution.QueryManager;
 import com.facebook.presto.execution.QueryManagerConfig;
 import com.facebook.presto.execution.QueryPerformanceFetcher;
 import com.facebook.presto.execution.QueryPerformanceFetcherProvider;
 import com.facebook.presto.execution.SqlTaskManager;
-import com.facebook.presto.execution.TaskExecutor;
+import com.facebook.presto.execution.StageInfo;
 import com.facebook.presto.execution.TaskInfo;
+import com.facebook.presto.execution.TaskManagementExecutor;
 import com.facebook.presto.execution.TaskManager;
 import com.facebook.presto.execution.TaskManagerConfig;
 import com.facebook.presto.execution.TaskStatus;
+import com.facebook.presto.execution.executor.TaskExecutor;
 import com.facebook.presto.execution.resourceGroups.NoOpResourceGroupManager;
 import com.facebook.presto.execution.resourceGroups.ResourceGroupManager;
 import com.facebook.presto.execution.scheduler.FlatNetworkTopology;
@@ -56,7 +60,6 @@ import com.facebook.presto.memory.MemoryResource;
 import com.facebook.presto.memory.NodeMemoryConfig;
 import com.facebook.presto.memory.ReservedSystemMemoryConfig;
 import com.facebook.presto.metadata.CatalogManager;
-import com.facebook.presto.metadata.CatalogManagerConfig;
 import com.facebook.presto.metadata.DiscoveryNodeManager;
 import com.facebook.presto.metadata.ForNodeManager;
 import com.facebook.presto.metadata.HandleJsonModule;
@@ -65,17 +68,20 @@ import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.MetadataManager;
 import com.facebook.presto.metadata.SchemaPropertyManager;
 import com.facebook.presto.metadata.SessionPropertyManager;
+import com.facebook.presto.metadata.StaticCatalogStore;
+import com.facebook.presto.metadata.StaticCatalogStoreConfig;
 import com.facebook.presto.metadata.TablePropertyManager;
 import com.facebook.presto.metadata.ViewDefinition;
 import com.facebook.presto.operator.ExchangeClientConfig;
 import com.facebook.presto.operator.ExchangeClientFactory;
 import com.facebook.presto.operator.ExchangeClientSupplier;
 import com.facebook.presto.operator.ForExchange;
+import com.facebook.presto.operator.LookupJoinOperators;
+import com.facebook.presto.operator.PagesIndex;
 import com.facebook.presto.operator.index.IndexJoinLookupStats;
 import com.facebook.presto.server.remotetask.HttpLocationFactory;
-import com.facebook.presto.spi.ConnectorPageSinkProvider;
-import com.facebook.presto.spi.ConnectorPageSourceProvider;
 import com.facebook.presto.spi.ConnectorSplit;
+import com.facebook.presto.spi.HostAddress;
 import com.facebook.presto.spi.PageIndexerFactory;
 import com.facebook.presto.spi.PageSorter;
 import com.facebook.presto.spi.block.Block;
@@ -83,8 +89,13 @@ import com.facebook.presto.spi.block.BlockEncodingFactory;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
-import com.facebook.presto.spiller.BinarySpillerFactory;
+import com.facebook.presto.spiller.FileSingleStreamSpillerFactory;
+import com.facebook.presto.spiller.GenericSpillerFactory;
+import com.facebook.presto.spiller.LocalSpillManager;
+import com.facebook.presto.spiller.NodeSpillConfig;
+import com.facebook.presto.spiller.SingleStreamSpillerFactory;
 import com.facebook.presto.spiller.SpillerFactory;
+import com.facebook.presto.spiller.SpillerStats;
 import com.facebook.presto.split.PageSinkManager;
 import com.facebook.presto.split.PageSinkProvider;
 import com.facebook.presto.split.PageSourceManager;
@@ -95,7 +106,10 @@ import com.facebook.presto.sql.Serialization.ExpressionSerializer;
 import com.facebook.presto.sql.Serialization.FunctionCallDeserializer;
 import com.facebook.presto.sql.analyzer.FeaturesConfig;
 import com.facebook.presto.sql.gen.ExpressionCompiler;
+import com.facebook.presto.sql.gen.JoinCompiler;
 import com.facebook.presto.sql.gen.JoinFilterFunctionCompiler;
+import com.facebook.presto.sql.gen.JoinProbeCompiler;
+import com.facebook.presto.sql.gen.OrderingCompiler;
 import com.facebook.presto.sql.parser.SqlParser;
 import com.facebook.presto.sql.parser.SqlParserOptions;
 import com.facebook.presto.sql.planner.CompilerConfig;
@@ -110,21 +124,31 @@ import com.facebook.presto.transaction.TransactionManagerConfig;
 import com.facebook.presto.type.TypeDeserializer;
 import com.facebook.presto.type.TypeRegistry;
 import com.facebook.presto.util.FinalizerService;
+import com.facebook.presto.util.KerberosPrincipal;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.inject.Binder;
+import com.google.inject.Key;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
 import com.google.inject.TypeLiteral;
 import io.airlift.concurrent.BoundedExecutor;
 import io.airlift.configuration.AbstractConfigurationAwareModule;
 import io.airlift.discovery.client.ServiceDescriptor;
-import io.airlift.node.NodeInfo;
+import io.airlift.http.client.BasicAuthRequestFilter;
+import io.airlift.http.client.HttpClientConfig;
+import io.airlift.http.client.spnego.KerberosConfig;
 import io.airlift.slice.Slice;
 import io.airlift.stats.PauseMeter;
+import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
 
+import javax.annotation.PreDestroy;
+import javax.inject.Inject;
 import javax.inject.Singleton;
 
+import java.io.File;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -132,6 +156,7 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import static com.facebook.presto.execution.scheduler.NodeSchedulerConfig.NetworkTopologyType.FLAT;
 import static com.facebook.presto.execution.scheduler.NodeSchedulerConfig.NetworkTopologyType.LEGACY;
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Strings.nullToEmpty;
 import static com.google.common.reflect.Reflection.newProxy;
@@ -144,6 +169,7 @@ import static io.airlift.http.client.HttpClientBinder.httpClientBinder;
 import static io.airlift.jaxrs.JaxrsBinder.jaxrsBinder;
 import static io.airlift.json.JsonBinder.jsonBinder;
 import static io.airlift.json.JsonCodecBinder.jsonCodecBinder;
+import static io.airlift.units.DataSize.Unit.MEGABYTE;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newCachedThreadPool;
 import static java.util.concurrent.Executors.newScheduledThreadPool;
@@ -179,6 +205,43 @@ public class ServerMainModule
             binder.bind(QueryManager.class).toInstance(newProxy(QueryManager.class, (proxy, method, args) -> {
                 throw new UnsupportedOperationException();
             }));
+        }
+
+        InternalCommunicationConfig internalCommunicationConfig = buildConfigObject(InternalCommunicationConfig.class);
+        configBinder(binder).bindConfigGlobalDefaults(HttpClientConfig.class, config -> {
+            config.setKeyStorePath(internalCommunicationConfig.getKeyStorePath());
+            config.setKeyStorePassword(internalCommunicationConfig.getKeyStorePassword());
+        });
+
+        String ldapUser = internalCommunicationConfig.getLdapUser();
+        checkState(ldapUser == null || (!internalCommunicationConfig.isKerberosEnabled()), "Set either LDAP or Kerberos authentication for secured communication between nodes");
+
+        if (ldapUser != null) {
+            String ldapPassword = internalCommunicationConfig.getLdapPassword();
+            checkArgument(ldapPassword != null, "ldap password must be set");
+            httpClientBinder(binder).bindGlobalFilter(new BasicAuthRequestFilter(ldapUser, ldapPassword));
+        }
+
+        if (internalCommunicationConfig.isKerberosEnabled()) {
+            File kerberosConfig = internalCommunicationConfig.getKerberosConfig();
+            File kerberosKeytab = internalCommunicationConfig.getKerberosKeytab();
+            KerberosPrincipal principal = KerberosPrincipal.valueOf(internalCommunicationConfig.getKerberosPrincipal());
+            String kerberosServiceName = internalCommunicationConfig.getKerberosServiceName();
+            checkArgument(kerberosConfig != null, "kerberos config must be set");
+            checkArgument(kerberosKeytab != null, "kerberos keytab must be set");
+            checkArgument(kerberosServiceName != null, "kerberos service name must be set");
+
+            configBinder(binder).bindConfigGlobalDefaults(KerberosConfig.class, config -> {
+                config.setConfig(kerberosConfig);
+                config.setKeytab(kerberosKeytab);
+                config.setUseCanonicalHostname(internalCommunicationConfig.isKerberosUseCanonicalHostname());
+                config.setCredentialCache(internalCommunicationConfig.getKerberosCredentialCache());
+            });
+            configBinder(binder).bindConfigGlobalDefaults(HttpClientConfig.class, config -> {
+                config.setAuthenticationEnabled(true);
+                config.setKerberosPrincipal(principal.substituteHostnamePlaceholder().toString());
+                config.setKerberosRemoteServiceName(kerberosServiceName);
+            });
         }
 
         configBinder(binder).bindConfig(FeaturesConfig.class);
@@ -238,7 +301,12 @@ public class ServerMainModule
         // task execution
         jaxrsBinder(binder).bind(TaskResource.class);
         newExporter(binder).export(TaskResource.class).withGeneratedName();
-        binder.bind(TaskManager.class).to(SqlTaskManager.class).in(Scopes.SINGLETON);
+        binder.bind(TaskManagementExecutor.class).in(Scopes.SINGLETON);
+        binder.bind(SqlTaskManager.class).in(Scopes.SINGLETON);
+        binder.bind(TaskManager.class).to(Key.get(SqlTaskManager.class));
+
+        // memory revoking scheduler
+        binder.bind(MemoryRevokingScheduler.class).in(Scopes.SINGLETON);
 
         // workaround for CodeCache GC issue
         if (JavaVersion.current().getMajor() == 8) {
@@ -268,8 +336,18 @@ public class ServerMainModule
         binder.bind(AsyncHttpExecutionMBean.class).in(Scopes.SINGLETON);
         newExporter(binder).export(AsyncHttpExecutionMBean.class).withGeneratedName();
         binder.bind(JoinFilterFunctionCompiler.class).in(Scopes.SINGLETON);
+        newExporter(binder).export(JoinFilterFunctionCompiler.class).withGeneratedName();
+        binder.bind(JoinCompiler.class).in(Scopes.SINGLETON);
+        newExporter(binder).export(JoinCompiler.class).withGeneratedName();
+        binder.bind(OrderingCompiler.class).in(Scopes.SINGLETON);
+        newExporter(binder).export(OrderingCompiler.class).withGeneratedName();
+        binder.bind(PagesIndex.Factory.class).to(PagesIndex.DefaultFactory.class);
+        binder.bind(JoinProbeCompiler.class).in(Scopes.SINGLETON);
+        newExporter(binder).export(JoinProbeCompiler.class).withGeneratedName();
+        binder.bind(LookupJoinOperators.class).in(Scopes.SINGLETON);
 
         jsonCodecBinder(binder).bindJsonCodec(TaskStatus.class);
+        jsonCodecBinder(binder).bindJsonCodec(StageInfo.class);
         jsonCodecBinder(binder).bindJsonCodec(TaskInfo.class);
         jaxrsBinder(binder).bind(PagesResponseWriter.class);
 
@@ -281,6 +359,7 @@ public class ServerMainModule
                     config.setIdleTimeout(new Duration(30, SECONDS));
                     config.setRequestTimeout(new Duration(10, SECONDS));
                     config.setMaxConnectionsPerServer(250);
+                    config.setMaxContentLength(new DataSize(32, MEGABYTE));
                 });
 
         configBinder(binder).bindConfig(ExchangeClientConfig.class);
@@ -302,18 +381,19 @@ public class ServerMainModule
         // data stream provider
         binder.bind(PageSourceManager.class).in(Scopes.SINGLETON);
         binder.bind(PageSourceProvider.class).to(PageSourceManager.class).in(Scopes.SINGLETON);
-        newSetBinder(binder, ConnectorPageSourceProvider.class);
 
         // page sink provider
         binder.bind(PageSinkManager.class).in(Scopes.SINGLETON);
         binder.bind(PageSinkProvider.class).to(PageSinkManager.class).in(Scopes.SINGLETON);
-        newSetBinder(binder, ConnectorPageSinkProvider.class);
 
         // metadata
-        binder.bind(CatalogManager.class).in(Scopes.SINGLETON);
-        configBinder(binder).bindConfig(CatalogManagerConfig.class);
+        binder.bind(StaticCatalogStore.class).in(Scopes.SINGLETON);
+        configBinder(binder).bindConfig(StaticCatalogStoreConfig.class);
         binder.bind(MetadataManager.class).in(Scopes.SINGLETON);
         binder.bind(Metadata.class).to(MetadataManager.class).in(Scopes.SINGLETON);
+
+        // statistics calculator
+        binder.bind(CostCalculator.class).to(CoefficientBasedCostCalculator.class).in(Scopes.SINGLETON);
 
         // type
         binder.bind(TypeRegistry.class).in(Scopes.SINGLETON);
@@ -375,6 +455,8 @@ public class ServerMainModule
         binder.bind(PluginManager.class).in(Scopes.SINGLETON);
         configBinder(binder).bindConfig(PluginManagerConfig.class);
 
+        binder.bind(CatalogManager.class).in(Scopes.SINGLETON);
+
         // optimizers
         binder.bind(PlanOptimizers.class).in(Scopes.SINGLETON);
 
@@ -398,20 +480,21 @@ public class ServerMainModule
         binder.bind(FinalizerService.class).in(Scopes.SINGLETON);
 
         // Spiller
-        binder.bind(SpillerFactory.class).to(BinarySpillerFactory.class).in(Scopes.SINGLETON);
-    }
+        binder.bind(SpillerFactory.class).to(GenericSpillerFactory.class).in(Scopes.SINGLETON);
+        binder.bind(SingleStreamSpillerFactory.class).to(FileSingleStreamSpillerFactory.class).in(Scopes.SINGLETON);
+        binder.bind(SpillerStats.class).in(Scopes.SINGLETON);
+        newExporter(binder).export(SpillerFactory.class).withGeneratedName();
+        binder.bind(LocalSpillManager.class).in(Scopes.SINGLETON);
+        configBinder(binder).bindConfig(NodeSpillConfig.class);
 
-    @Provides
-    @Singleton
-    public ServerInfo createServerInfo(NodeVersion nodeVersion, NodeInfo nodeInfo, ServerConfig serverConfig)
-    {
-        return new ServerInfo(nodeVersion, nodeInfo.getEnvironment(), serverConfig.isCoordinator());
+        // cleanup
+        binder.bind(ExecutorCleanup.class).in(Scopes.SINGLETON);
     }
 
     @Provides
     @Singleton
     @ForExchange
-    public ScheduledExecutorService createExchangeExecutor(ExchangeClientConfig config)
+    public static ScheduledExecutorService createExchangeExecutor(ExchangeClientConfig config)
     {
         return newScheduledThreadPool(config.getClientThreads(), daemonThreadsNamed("exchange-client-%s"));
     }
@@ -460,10 +543,11 @@ public class ServerMainModule
     @Singleton
     public static TransactionManager createTransactionManager(
             TransactionManagerConfig config,
+            CatalogManager catalogManager,
             @ForTransactionManager ScheduledExecutorService idleCheckExecutor,
             @ForTransactionManager ExecutorService finishingExecutor)
     {
-        return TransactionManager.create(config, idleCheckExecutor, finishingExecutor);
+        return TransactionManager.create(config, idleCheckExecutor, catalogManager, finishingExecutor);
     }
 
     private static void bindFailureDetector(Binder binder, boolean coordinator)
@@ -481,7 +565,41 @@ public class ServerMainModule
                 {
                     return ImmutableSet.of();
                 }
+
+                @Override
+                public State getState(HostAddress hostAddress)
+                {
+                    // failure detector is not available on workers
+                    return State.UNKNOWN;
+                }
             });
+        }
+    }
+
+    public static class ExecutorCleanup
+    {
+        private final List<ExecutorService> executors;
+
+        @Inject
+        public ExecutorCleanup(
+                @ForExchange ScheduledExecutorService exchangeExecutor,
+                @ForAsyncHttp ExecutorService httpResponseExecutor,
+                @ForAsyncHttp ScheduledExecutorService httpTimeoutExecutor,
+                @ForTransactionManager ExecutorService transactionFinishingExecutor,
+                @ForTransactionManager ScheduledExecutorService transactionIdleExecutor)
+        {
+            executors = ImmutableList.of(
+                    exchangeExecutor,
+                    httpResponseExecutor,
+                    httpTimeoutExecutor,
+                    transactionFinishingExecutor,
+                    transactionIdleExecutor);
+        }
+
+        @PreDestroy
+        public void shutdown()
+        {
+            executors.forEach(ExecutorService::shutdownNow);
         }
     }
 }

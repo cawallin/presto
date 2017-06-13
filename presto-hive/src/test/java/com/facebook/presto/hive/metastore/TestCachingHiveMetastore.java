@@ -29,6 +29,7 @@ import static com.facebook.presto.hive.metastore.MockHiveMetastoreClient.BAD_DAT
 import static com.facebook.presto.hive.metastore.MockHiveMetastoreClient.TEST_DATABASE;
 import static com.facebook.presto.hive.metastore.MockHiveMetastoreClient.TEST_PARTITION1;
 import static com.facebook.presto.hive.metastore.MockHiveMetastoreClient.TEST_PARTITION2;
+import static com.facebook.presto.hive.metastore.MockHiveMetastoreClient.TEST_ROLES;
 import static com.facebook.presto.hive.metastore.MockHiveMetastoreClient.TEST_TABLE;
 import static com.google.common.util.concurrent.MoreExecutors.listeningDecorator;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
@@ -41,7 +42,7 @@ import static org.testng.Assert.assertNotNull;
 public class TestCachingHiveMetastore
 {
     private MockHiveMetastoreClient mockClient;
-    private ExtendedHiveMetastore metastore;
+    private CachingHiveMetastore metastore;
     private ThriftHiveMetastoreStats stats;
 
     @BeforeMethod
@@ -56,7 +57,8 @@ public class TestCachingHiveMetastore
                 new BridgingHiveMetastore(thriftHiveMetastore),
                 executor,
                 new Duration(5, TimeUnit.MINUTES),
-                new Duration(1, TimeUnit.MINUTES));
+                new Duration(1, TimeUnit.MINUTES),
+                1000);
         stats = thriftHiveMetastore.getStats();
     }
 
@@ -200,6 +202,34 @@ public class TestCachingHiveMetastore
 
         // Fetching both should only result in one batched access
         assertEquals(metastore.getPartitionsByNames(TEST_DATABASE, TEST_TABLE, ImmutableList.of(TEST_PARTITION1, TEST_PARTITION2)).size(), 2);
+        assertEquals(mockClient.getAccessCount(), 4);
+    }
+
+    @Test
+    public void testListRoles()
+            throws Exception
+    {
+        assertEquals(mockClient.getAccessCount(), 0);
+
+        assertEquals(metastore.listRoles(), TEST_ROLES);
+        assertEquals(mockClient.getAccessCount(), 1);
+
+        assertEquals(metastore.listRoles(), TEST_ROLES);
+        assertEquals(mockClient.getAccessCount(), 1);
+
+        metastore.flushCache();
+
+        assertEquals(metastore.listRoles(), TEST_ROLES);
+        assertEquals(mockClient.getAccessCount(), 2);
+
+        metastore.createRole("role", "grantor");
+
+        assertEquals(metastore.listRoles(), TEST_ROLES);
+        assertEquals(mockClient.getAccessCount(), 3);
+
+        metastore.dropRole("testrole");
+
+        assertEquals(metastore.listRoles(), TEST_ROLES);
         assertEquals(mockClient.getAccessCount(), 4);
     }
 

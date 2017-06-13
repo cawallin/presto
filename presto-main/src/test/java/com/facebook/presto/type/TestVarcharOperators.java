@@ -50,6 +50,7 @@ public class TestVarcharOperators
         assertFunction("'foo' || 'bar'", VARCHAR, "foo" + "bar");
         assertFunction("'bar' || 'foo'", VARCHAR, "bar" + "foo");
         assertFunction("'bar' || 'bar'", VARCHAR, "bar" + "bar");
+        assertFunction("'bar' || 'barbaz'", VARCHAR, "bar" + "barbaz");
     }
 
     @Test
@@ -127,5 +128,16 @@ public class TestVarcharOperators
 
         assertFunction("'bar' BETWEEN 'bar' AND 'foo'", BOOLEAN, true);
         assertFunction("'bar' BETWEEN 'bar' AND 'bar'", BOOLEAN, true);
+    }
+
+    @Test
+    public void testIsDistinctFrom()
+            throws Exception
+    {
+        assertFunction("CAST(NULL AS VARCHAR) IS DISTINCT FROM CAST(NULL AS VARCHAR)", BOOLEAN, false);
+        assertFunction("'foo' IS DISTINCT FROM 'foo'", BOOLEAN, false);
+        assertFunction("'foo' IS DISTINCT FROM 'fo0'", BOOLEAN, true);
+        assertFunction("NULL IS DISTINCT FROM 'foo'", BOOLEAN, true);
+        assertFunction("'foo' IS DISTINCT FROM NULL", BOOLEAN, true);
     }
 }

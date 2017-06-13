@@ -5,7 +5,7 @@
     <parent>
         <groupId>com.facebook.presto</groupId>
         <artifactId>presto-root</artifactId>
-        <version>0.154-SNAPSHOT</version>
+        <version>0.178-t-SNAPSHOT</version>
     </parent>
 
     <artifactId>presto-cli</artifactId>
@@ -22,6 +22,11 @@
         <dependency>
             <groupId>com.facebook.presto</groupId>
             <artifactId>presto-client</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.facebook.presto</groupId>
+            <artifactId>presto-spi</artifactId>
         </dependency>
 
         <dependency>

@@ -13,7 +13,9 @@
  */
 package com.facebook.presto.operator.aggregation.builder;
 
+import com.facebook.presto.operator.HashCollisionsCounter;
 import com.facebook.presto.spi.Page;
+import com.google.common.util.concurrent.ListenableFuture;
 
 import java.util.Iterator;
 
@@ -26,6 +28,14 @@ public interface HashAggregationBuilder
 
     boolean isFull();
 
+    void updateMemory();
+
+    void recordHashCollisions(HashCollisionsCounter hashCollisionsCounter);
+
     @Override
     void close();
+
+    ListenableFuture<?> startMemoryRevoke();
+
+    void finishMemoryRevoke();
 }

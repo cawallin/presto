@@ -23,6 +23,7 @@ import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.VarcharType;
 import com.facebook.presto.sql.parser.SqlParser;
 import com.facebook.presto.sql.planner.plan.AggregationNode;
+import com.facebook.presto.sql.planner.plan.Assignments;
 import com.facebook.presto.sql.planner.plan.PlanNode;
 import com.facebook.presto.sql.planner.plan.PlanNodeId;
 import com.facebook.presto.sql.planner.plan.ProjectNode;
@@ -36,6 +37,8 @@ import com.facebook.presto.sql.tree.FrameBound;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.WindowFrame;
+import com.facebook.presto.testing.TestingMetadata.TestingColumnHandle;
+import com.facebook.presto.testing.TestingMetadata.TestingTableHandle;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
 import com.google.common.collect.ImmutableMap;
@@ -106,7 +109,7 @@ public class TestTypeValidator
     {
         Expression expression1 = new Cast(columnB.toSymbolReference(), StandardTypes.BIGINT);
         Expression expression2 = new Cast(columnC.toSymbolReference(), StandardTypes.BIGINT);
-        Map<Symbol, Expression> assignments = ImmutableMap.<Symbol, Expression>builder()
+        Assignments assignments = Assignments.builder()
                 .put(symbolAllocator.newSymbol(expression1, BIGINT), expression1)
                 .put(symbolAllocator.newSymbol(expression2, BIGINT), expression2)
                 .build();
@@ -200,8 +203,6 @@ public class TestTypeValidator
                 ImmutableList.of(ImmutableList.of(columnA, columnB)),
                 SINGLE,
                 Optional.empty(),
-                0,
-                Optional.empty(),
                 Optional.empty());
 
         assertTypesValid(node);
@@ -212,7 +213,7 @@ public class TestTypeValidator
             throws Exception
     {
         Expression expression = new Cast(columnB.toSymbolReference(), StandardTypes.BIGINT);
-        Map<Symbol, Expression> assignments = ImmutableMap.<Symbol, Expression>builder()
+        Assignments assignments = Assignments.builder()
                 .put(symbolAllocator.newSymbol(expression, BIGINT), expression)
                 .put(symbolAllocator.newSymbol(columnE.toSymbolReference(), VARCHAR), columnE.toSymbolReference()) // implicit coercion from varchar(3) to varchar
                 .build();
@@ -227,7 +228,7 @@ public class TestTypeValidator
     {
         Expression expression1 = new Cast(columnB.toSymbolReference(), StandardTypes.INTEGER);
         Expression expression2 = new Cast(columnA.toSymbolReference(), StandardTypes.INTEGER);
-        Map<Symbol, Expression> assignments = ImmutableMap.<Symbol, Expression>builder()
+        Assignments assignments = Assignments.builder()
                 .put(symbolAllocator.newSymbol(expression1, BIGINT), expression1) // should be INTEGER
                 .put(symbolAllocator.newSymbol(expression1, INTEGER), expression2)
                 .build();
@@ -264,8 +265,6 @@ public class TestTypeValidator
                 ImmutableList.of(ImmutableList.of(columnA, columnB)),
                 SINGLE,
                 Optional.empty(),
-                0,
-                Optional.empty(),
                 Optional.empty());
 
         assertTypesValid(node);
@@ -295,8 +294,6 @@ public class TestTypeValidator
                 ImmutableMap.of(),
                 ImmutableList.of(ImmutableList.of(columnA, columnB)),
                 SINGLE,
-                Optional.empty(),
-                0,
                 Optional.empty(),
                 Optional.empty());
 

@@ -20,6 +20,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
 
 import javax.annotation.concurrent.Immutable;
 
@@ -34,11 +35,17 @@ import static java.util.Objects.requireNonNull;
 public class TopNNode
         extends PlanNode
 {
+    public enum Step {
+        SINGLE,
+        PARTIAL,
+        FINAL
+    }
+
     private final PlanNode source;
     private final long count;
     private final List<Symbol> orderBy;
     private final Map<Symbol, SortOrder> orderings;
-    private final boolean partial;
+    private final Step step;
 
     @JsonCreator
     public TopNNode(@JsonProperty("id") PlanNodeId id,
@@ -46,7 +53,7 @@ public class TopNNode
             @JsonProperty("count") long count,
             @JsonProperty("orderBy") List<Symbol> orderBy,
             @JsonProperty("orderings") Map<Symbol, SortOrder> orderings,
-            @JsonProperty("partial") boolean partial)
+            @JsonProperty("step") Step step)
     {
         super(id);
 
@@ -61,7 +68,7 @@ public class TopNNode
         this.count = count;
         this.orderBy = ImmutableList.copyOf(orderBy);
         this.orderings = ImmutableMap.copyOf(orderings);
-        this.partial = partial;
+        this.step = requireNonNull(step, "step is null");
     }
 
     @Override
@@ -100,15 +107,21 @@ public class TopNNode
         return orderings;
     }
 
-    @JsonProperty("partial")
-    public boolean isPartial()
+    @JsonProperty("step")
+    public Step getStep()
     {
-        return partial;
+        return step;
     }
 
     @Override
-    public <C, R> R accept(PlanVisitor<C, R> visitor, C context)
+    public <R, C> R accept(PlanVisitor<R, C> visitor, C context)
     {
         return visitor.visitTopN(this, context);
+    }
+
+    @Override
+    public PlanNode replaceChildren(List<PlanNode> newChildren)
+    {
+        return new TopNNode(getId(), Iterables.getOnlyElement(newChildren), count, orderBy, orderings, step);
     }
 }

@@ -21,11 +21,11 @@ import com.facebook.presto.memory.QueryContext;
 import com.facebook.presto.operator.TaskContext;
 import com.facebook.presto.spi.QueryId;
 import com.facebook.presto.spi.memory.MemoryPoolId;
+import com.facebook.presto.spiller.SpillSpaceTracker;
 import io.airlift.units.DataSize;
 
 import java.util.concurrent.Executor;
 
-import static com.facebook.presto.util.Threads.checkNotSameThreadExecutor;
 import static io.airlift.units.DataSize.Unit.GIGABYTE;
 import static io.airlift.units.DataSize.Unit.MEGABYTE;
 
@@ -35,32 +35,91 @@ public final class TestingTaskContext
 
     public static TaskContext createTaskContext(Executor executor, Session session)
     {
-        return createTaskContext(
-                checkNotSameThreadExecutor(executor, "executor is null"),
-                session,
-                new DataSize(256, MEGABYTE));
+        return builder(executor, session).build();
     }
 
     public static TaskContext createTaskContext(Executor executor, Session session, DataSize maxMemory)
     {
-        return createTaskContext(executor, session, maxMemory, new DataSize(1, MEGABYTE));
+        return builder(executor, session)
+                .setQueryMaxMemory(maxMemory)
+                .build();
     }
 
-    public static TaskContext createTaskContext(Executor executor, Session session, DataSize maxMemory, DataSize preallocated)
-    {
-        MemoryPool memoryPool = new MemoryPool(new MemoryPoolId("test"), new DataSize(1, GIGABYTE));
-        MemoryPool systemMemoryPool = new MemoryPool(new MemoryPoolId("testSystem"), new DataSize(1, GIGABYTE));
-        QueryContext queryContext = new QueryContext(new QueryId("test_query"), maxMemory, memoryPool, systemMemoryPool, executor);
-        return createTaskContext(queryContext, executor, session, preallocated);
-    }
-
-    public static TaskContext createTaskContext(QueryContext queryContext, Executor executor, Session session, DataSize preallocated)
+    public static TaskContext createTaskContext(QueryContext queryContext, Executor executor, Session session)
     {
         return queryContext.addTaskContext(
-                new TaskStateMachine(new TaskId("query", 0, 0), checkNotSameThreadExecutor(executor, "executor is null")),
+                new TaskStateMachine(new TaskId("query", 0, 0), executor),
                 session,
-                preallocated,
                 true,
                 true);
+    }
+
+    public static Builder builder(Executor executor, Session session)
+    {
+        return new Builder(executor, session);
+    }
+
+    public static class Builder
+    {
+        private final Executor executor;
+        private final Session session;
+        private DataSize queryMaxMemory = new DataSize(256, MEGABYTE);
+        private DataSize memoryPoolSize = new DataSize(1, GIGABYTE);
+        private DataSize systemMemoryPoolSize = new DataSize(1, GIGABYTE);
+        private DataSize maxSpillSize = new DataSize(1, GIGABYTE);
+        private DataSize queryMaxSpillSize = new DataSize(1, GIGABYTE);
+
+        private Builder(Executor executor, Session session)
+        {
+            this.executor = executor;
+            this.session = session;
+        }
+
+        public Builder setQueryMaxMemory(DataSize queryMaxMemory)
+        {
+            this.queryMaxMemory = queryMaxMemory;
+            return this;
+        }
+
+        public Builder setMemoryPoolSize(DataSize memoryPoolSize)
+        {
+            this.memoryPoolSize = memoryPoolSize;
+            return this;
+        }
+
+        public Builder setSystemMemoryPoolSize(DataSize systemMemoryPoolSize)
+        {
+            this.systemMemoryPoolSize = systemMemoryPoolSize;
+            return this;
+        }
+
+        public Builder setMaxSpillSize(DataSize maxSpillSize)
+        {
+            this.maxSpillSize = maxSpillSize;
+            return this;
+        }
+
+        public Builder setQueryMaxSpillSize(DataSize queryMaxSpillSize)
+        {
+            this.queryMaxSpillSize = queryMaxSpillSize;
+            return this;
+        }
+
+        public TaskContext build()
+        {
+            MemoryPool memoryPool = new MemoryPool(new MemoryPoolId("test"), memoryPoolSize);
+            MemoryPool systemMemoryPool = new MemoryPool(new MemoryPoolId("testSystem"), systemMemoryPoolSize);
+            SpillSpaceTracker spillSpaceTracker = new SpillSpaceTracker(maxSpillSize);
+            QueryContext queryContext = new QueryContext(
+                    new QueryId("test_query"),
+                    queryMaxMemory,
+                    memoryPool,
+                    systemMemoryPool,
+                    executor,
+                    queryMaxSpillSize,
+                    spillSpaceTracker);
+
+            return createTaskContext(queryContext, executor, session);
+        }
     }
 }

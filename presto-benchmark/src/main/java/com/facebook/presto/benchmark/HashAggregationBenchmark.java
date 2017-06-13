@@ -58,11 +58,12 @@ public class HashAggregationBenchmark
                 Ints.asList(0),
                 ImmutableList.of(),
                 Step.SINGLE,
-                ImmutableList.of(doubleSum.bind(ImmutableList.of(1), Optional.empty(), Optional.empty(), 1.0)),
+                ImmutableList.of(doubleSum.bind(ImmutableList.of(1), Optional.empty())),
                 Optional.empty(),
                 Optional.empty(),
                 100_000,
-                new DataSize(16, MEGABYTE));
+                new DataSize(16, MEGABYTE),
+                JOIN_COMPILER);
         return ImmutableList.of(tableScanOperator, aggregationOperator);
     }
 

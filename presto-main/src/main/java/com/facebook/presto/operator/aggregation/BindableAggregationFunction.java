@@ -23,6 +23,7 @@ import com.facebook.presto.operator.aggregation.state.StateCompiler;
 import com.facebook.presto.spi.function.AccumulatorStateFactory;
 import com.facebook.presto.spi.function.AccumulatorStateSerializer;
 import com.facebook.presto.spi.function.AggregationFunction;
+import com.facebook.presto.spi.function.AggregationState;
 import com.facebook.presto.spi.function.SqlType;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
@@ -42,12 +43,11 @@ import static com.facebook.presto.metadata.SignatureBinder.applyBoundVariables;
 import static com.facebook.presto.operator.aggregation.AggregationCompiler.isParameterBlock;
 import static com.facebook.presto.operator.aggregation.AggregationCompiler.isParameterNullable;
 import static com.facebook.presto.operator.aggregation.AggregationMetadata.ParameterMetadata.ParameterType.BLOCK_INDEX;
-import static com.facebook.presto.operator.aggregation.AggregationMetadata.ParameterMetadata.ParameterType.SAMPLE_WEIGHT;
 import static com.facebook.presto.operator.aggregation.AggregationMetadata.ParameterMetadata.ParameterType.STATE;
 import static com.facebook.presto.operator.aggregation.AggregationMetadata.ParameterMetadata.fromSqlType;
 import static com.facebook.presto.operator.aggregation.AggregationUtils.generateAggregationName;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.lang.invoke.MethodHandles.lookup;
 import static java.util.Objects.requireNonNull;
 
@@ -55,7 +55,6 @@ public class BindableAggregationFunction
     extends SqlAggregationFunction
 {
     private final String description;
-    private final boolean approximate;
     private final boolean decomposable;
 
     private final Class<?> definitionClass;
@@ -65,7 +64,6 @@ public class BindableAggregationFunction
 
     public BindableAggregationFunction(Signature signature,
             String description,
-            boolean approximate,
             boolean decomposable,
             Class<?> definitionClass,
             Class<?> stateClass,
@@ -74,7 +72,6 @@ public class BindableAggregationFunction
     {
         super(signature);
         this.description = description;
-        this.approximate = approximate;
         this.decomposable = decomposable;
         this.definitionClass = definitionClass;
         this.stateClass = stateClass;
@@ -102,10 +99,10 @@ public class BindableAggregationFunction
         DynamicClassLoader classLoader = new DynamicClassLoader(definitionClass.getClassLoader(), getClass().getClassLoader());
 
         AggregationMetadata metadata;
-        AccumulatorStateSerializer<?> stateSerializer = new StateCompiler().generateStateSerializer(stateClass, classLoader);
+        AccumulatorStateSerializer<?> stateSerializer = StateCompiler.generateStateSerializer(stateClass, classLoader);
         Type intermediateType = stateSerializer.getSerializedType();
         Method combineFunction = AggregationCompiler.getCombineFunction(definitionClass, stateClass);
-        AccumulatorStateFactory<?> stateFactory = new StateCompiler().generateStateFactory(stateClass, classLoader);
+        AccumulatorStateFactory<?> stateFactory = StateCompiler.generateStateFactory(stateClass, classLoader);
 
         try {
             MethodHandle inputHandle = lookup().unreflect(inputFunction);
@@ -120,8 +117,7 @@ public class BindableAggregationFunction
                     stateClass,
                     stateSerializer,
                     stateFactory,
-                    outputType,
-                    aggregationAnnotation.approximate());
+                    outputType);
         }
         catch (IllegalAccessException e) {
             throw Throwables.propagate(e);
@@ -134,7 +130,6 @@ public class BindableAggregationFunction
                 intermediateType,
                 outputType,
                 decomposable,
-                approximate,
                 factory);
     }
 
@@ -158,13 +153,21 @@ public class BindableAggregationFunction
         }
 
         ImmutableList.Builder<ParameterMetadata> builder = ImmutableList.builder();
-        builder.add(new ParameterMetadata(STATE));
 
         Annotation[][] annotations = method.getParameterAnnotations();
         String methodName = method.getDeclaringClass() + "." + method.getName();
 
-        // Start at 1 because 0 is the STATE
-        for (int i = 1; i < annotations.length; i++) {
+        checkArgument(annotations.length > 0, "At least @AggregationState argument is required for each of aggregation functions.");
+
+        int inputId = 0;
+        int i = 0;
+        if (annotations[0].length == 0) {
+            // Backward compatibility - first argument without annotations is interpreted as State argument
+            builder.add(new ParameterMetadata(STATE));
+            i++;
+        }
+
+        for (; i < annotations.length; i++) {
             Annotation baseTypeAnnotation = baseTypeAnnotation(annotations[i], methodName);
             if (baseTypeAnnotation instanceof SqlType) {
                 builder.add(fromSqlType(inputTypes.get(i - 1), isParameterBlock(annotations[i]), isParameterNullable(annotations[i]), methodName));
@@ -172,8 +175,8 @@ public class BindableAggregationFunction
             else if (baseTypeAnnotation instanceof BlockIndex) {
                 builder.add(new ParameterMetadata(BLOCK_INDEX));
             }
-            else if (baseTypeAnnotation instanceof SampleWeight) {
-                builder.add(new ParameterMetadata(SAMPLE_WEIGHT));
+            else if (baseTypeAnnotation instanceof AggregationState) {
+                builder.add(new ParameterMetadata(STATE));
             }
             else {
                 throw new IllegalArgumentException("Unsupported annotation: " + annotations[i]);
@@ -185,10 +188,10 @@ public class BindableAggregationFunction
     private static Annotation baseTypeAnnotation(Annotation[] annotations, String methodName)
     {
         List<Annotation> baseTypes = Arrays.asList(annotations).stream()
-                .filter(annotation -> annotation instanceof SqlType || annotation instanceof BlockIndex || annotation instanceof SampleWeight)
+                .filter(annotation -> annotation instanceof SqlType || annotation instanceof BlockIndex || annotation instanceof AggregationState)
                 .collect(toImmutableList());
 
-        checkArgument(baseTypes.size() == 1, "Parameter of %s must have exactly one of @SqlType, @BlockIndex, and @SampleWeight", methodName);
+        checkArgument(baseTypes.size() == 1, "Parameter of %s must have exactly one of @SqlType, @BlockIndex", methodName);
 
         boolean nullable = isParameterNullable(annotations);
         boolean isBlock = isParameterBlock(annotations);

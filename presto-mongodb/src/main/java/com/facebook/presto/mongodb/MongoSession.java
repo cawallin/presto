@@ -46,8 +46,6 @@ import io.airlift.slice.Slice;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
-import javax.inject.Inject;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -61,7 +59,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static com.facebook.presto.mongodb.ObjectIdType.OBJECT_ID;
-import static com.facebook.presto.mongodb.TypeUtils.checkType;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
@@ -101,8 +98,6 @@ public class MongoSession
     private static final String IN_OP = "$in";
     private static final String NOTIN_OP = "$nin";
 
-    protected final String connectorId;
-
     private final TypeManager typeManager;
     private final MongoClient client;
 
@@ -112,14 +107,9 @@ public class MongoSession
     private final LoadingCache<SchemaTableName, MongoTable> tableCache;
     private final String implicitPrefix;
 
-    @Inject
-    public MongoSession(TypeManager typeManager,
-                        String connectorId,
-                        final MongoClient client,
-                        MongoClientConfig config)
+    public MongoSession(TypeManager typeManager, MongoClient client, MongoClientConfig config)
     {
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
-        this.connectorId = requireNonNull(connectorId, "connectorId is null");
         this.client = requireNonNull(client, "client is null");
         this.schemaCollection = config.getSchemaCollection();
         this.cursorBatchSize = config.getCursorBatchSize();
@@ -155,9 +145,9 @@ public class MongoSession
         ImmutableSet.Builder<String> builder = ImmutableSet.builder();
 
         builder.addAll(ImmutableList.copyOf(client.getDatabase(schema).listCollectionNames()).stream()
-                            .filter(name -> !name.equals(schemaCollection))
-                            .filter(name -> !SYSTEM_TABLES.contains(name))
-                            .collect(toSet()));
+                .filter(name -> !name.equals(schemaCollection))
+                .filter(name -> !SYSTEM_TABLES.contains(name))
+                .collect(toSet()));
         builder.addAll(getTableMetadataNames(schema));
 
         return builder.build();
@@ -195,7 +185,7 @@ public class MongoSession
             columnHandles.add(columnHandle);
         }
 
-        MongoTableHandle tableHandle = new MongoTableHandle(connectorId, tableName);
+        MongoTableHandle tableHandle = new MongoTableHandle(tableName);
         return new MongoTable(tableHandle, columnHandles.build(), getIndexes(tableName));
     }
 
@@ -207,7 +197,7 @@ public class MongoSession
 
         Type type = typeManager.getType(TypeSignature.parseTypeSignature(typeString));
 
-        return new MongoColumnHandle(connectorId, name, type, hidden);
+        return new MongoColumnHandle(name, type, hidden);
     }
 
     private List<Document> getColumnMetadata(Document doc)
@@ -269,7 +259,7 @@ public class MongoSession
         Document query = new Document();
         if (tupleDomain.getDomains().isPresent()) {
             for (Map.Entry<ColumnHandle, Domain> entry : tupleDomain.getDomains().get().entrySet()) {
-                MongoColumnHandle column = checkType(entry.getKey(), MongoColumnHandle.class, "columnHandle");
+                MongoColumnHandle column = (MongoColumnHandle) entry.getKey();
                 query.putAll(buildPredicate(column, entry.getValue()));
             }
         }
@@ -280,6 +270,7 @@ public class MongoSession
     private static Document buildPredicate(MongoColumnHandle column, Domain domain)
     {
         String name = column.getName();
+        Type type = column.getType();
         if (domain.getValues().isNone() && domain.isNullAllowed()) {
             return documentOf(name, isNullPredicate());
         }
@@ -297,30 +288,30 @@ public class MongoSession
                 Document rangeConjuncts = new Document();
                 if (!range.getLow().isLowerUnbounded()) {
                     switch (range.getLow().getBound()) {
-                    case ABOVE:
-                        rangeConjuncts.put(GT_OP, range.getLow().getValue());
-                        break;
-                    case EXACTLY:
-                        rangeConjuncts.put(GTE_OP, range.getLow().getValue());
-                        break;
-                    case BELOW:
-                        throw new IllegalArgumentException("Low Marker should never use BELOW bound: " + range);
-                    default:
-                        throw new AssertionError("Unhandled bound: " + range.getLow().getBound());
+                        case ABOVE:
+                            rangeConjuncts.put(GT_OP, range.getLow().getValue());
+                            break;
+                        case EXACTLY:
+                            rangeConjuncts.put(GTE_OP, range.getLow().getValue());
+                            break;
+                        case BELOW:
+                            throw new IllegalArgumentException("Low Marker should never use BELOW bound: " + range);
+                        default:
+                            throw new AssertionError("Unhandled bound: " + range.getLow().getBound());
                     }
                 }
                 if (!range.getHigh().isUpperUnbounded()) {
                     switch (range.getHigh().getBound()) {
-                    case ABOVE:
-                        throw new IllegalArgumentException("High Marker should never use ABOVE bound: " + range);
-                    case EXACTLY:
-                        rangeConjuncts.put(LTE_OP, range.getHigh().getValue());
-                        break;
-                    case BELOW:
-                        rangeConjuncts.put(LT_OP, range.getHigh().getValue());
-                        break;
-                    default:
-                        throw new AssertionError("Unhandled bound: " + range.getHigh().getBound());
+                        case ABOVE:
+                            throw new IllegalArgumentException("High Marker should never use ABOVE bound: " + range);
+                        case EXACTLY:
+                            rangeConjuncts.put(LTE_OP, range.getHigh().getValue());
+                            break;
+                        case BELOW:
+                            rangeConjuncts.put(LT_OP, range.getHigh().getValue());
+                            break;
+                        default:
+                            throw new AssertionError("Unhandled bound: " + range.getHigh().getBound());
                     }
                 }
                 // If rangeConjuncts is null, then the range was ALL, which should already have been checked for
@@ -331,11 +322,11 @@ public class MongoSession
 
         // Add back all of the possible single values either as an equality or an IN predicate
         if (singleValues.size() == 1) {
-            disjuncts.add(documentOf(EQ_OP, translateValue(singleValues.get(0))));
+            disjuncts.add(documentOf(EQ_OP, translateValue(singleValues.get(0), type)));
         }
         else if (singleValues.size() > 1) {
             disjuncts.add(documentOf(IN_OP, singleValues.stream()
-                    .map(MongoSession::translateValue)
+                    .map(value -> translateValue(value, type))
                     .collect(toList())));
         }
 
@@ -344,14 +335,19 @@ public class MongoSession
         }
 
         return orPredicate(disjuncts.stream()
-                            .map(disjunct -> new Document(name, disjunct))
-                            .collect(toList()));
+                .map(disjunct -> new Document(name, disjunct))
+                .collect(toList()));
     }
 
-    private static Object translateValue(Object source)
+    private static Object translateValue(Object source, Type type)
     {
         if (source instanceof Slice) {
-            return ((Slice) source).toStringUtf8();
+            if (type instanceof ObjectIdType) {
+                return new ObjectId(((Slice) source).getBytes());
+            }
+            else {
+                return ((Slice) source).toStringUtf8();
+            }
         }
 
         return source;
@@ -448,12 +444,12 @@ public class MongoSession
 
         ArrayList<Document> fields = new ArrayList<>();
         if (!columns.stream().anyMatch(c -> c.getName().equals("_id"))) {
-            fields.add(new MongoColumnHandle(connectorId, "_id", OBJECT_ID, true).getDocument());
+            fields.add(new MongoColumnHandle("_id", OBJECT_ID, true).getDocument());
         }
 
         fields.addAll(columns.stream()
-                        .map(MongoColumnHandle::getDocument)
-                        .collect(toList()));
+                .map(MongoColumnHandle::getDocument)
+                .collect(toList()));
 
         metadata.append(FIELDS_KEY, fields);
 
@@ -505,7 +501,7 @@ public class MongoSession
                 builder.add(metadata);
             }
             else {
-                log.debug("Unable to guess field type from %s : %s", value.getClass().getName(), value);
+                log.debug("Unable to guess field type from %s : %s", value == null ? "null" : value.getClass().getName(), value);
             }
         }
 
@@ -514,6 +510,10 @@ public class MongoSession
 
     private Optional<TypeSignature> guessFieldType(Object value)
     {
+        if (value == null) {
+            return Optional.empty();
+        }
+
         TypeSignature typeSignature = null;
         if (value instanceof String) {
             typeSignature = createUnboundedVarcharType().getTypeSignature();
@@ -545,8 +545,8 @@ public class MongoSession
             Set<TypeSignature> signatures = subTypes.stream().map(t -> t.get()).collect(toSet());
             if (signatures.size() == 1) {
                 typeSignature = new TypeSignature(StandardTypes.ARRAY, signatures.stream()
-                                                                        .map(s -> TypeSignatureParameter.of(s))
-                                                                        .collect(Collectors.toList()));
+                        .map(s -> TypeSignatureParameter.of(s))
+                        .collect(Collectors.toList()));
             }
             else {
                 // TODO: presto cli doesn't handle empty field name row type yet

@@ -31,6 +31,7 @@ import com.facebook.presto.spi.predicate.TupleDomain;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -38,7 +39,6 @@ import static com.facebook.presto.spi.NodeState.ACTIVE;
 import static com.facebook.presto.spi.SystemTable.Distribution.ALL_COORDINATORS;
 import static com.facebook.presto.spi.SystemTable.Distribution.ALL_NODES;
 import static com.facebook.presto.spi.SystemTable.Distribution.SINGLE_COORDINATOR;
-import static com.facebook.presto.util.Types.checkType;
 import static com.google.common.collect.Maps.uniqueIndex;
 import static java.util.Objects.requireNonNull;
 
@@ -55,9 +55,9 @@ public class SystemSplitManager
     }
 
     @Override
-    public ConnectorSplitSource getSplits(ConnectorTransactionHandle transactionHandle, ConnectorSession session, ConnectorTableLayoutHandle layout)
+    public ConnectorSplitSource getSplits(ConnectorTransactionHandle transactionHandle, ConnectorSession session, ConnectorTableLayoutHandle layout, List<ColumnHandle> columns)
     {
-        SystemTableLayoutHandle layoutHandle = checkType(layout, SystemTableLayoutHandle.class, "layout");
+        SystemTableLayoutHandle layoutHandle = (SystemTableLayoutHandle) layout;
         SystemTableHandle tableHandle = layoutHandle.getTable();
 
         TupleDomain<ColumnHandle> constraint = layoutHandle.getConstraint();

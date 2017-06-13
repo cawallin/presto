@@ -71,7 +71,7 @@ public class HashSemiJoinOperator
         public Operator createOperator(DriverContext driverContext)
         {
             checkState(!closed, "Factory is already closed");
-            OperatorContext operatorContext = driverContext.addOperatorContext(operatorId, planNodeId, HashBuilderOperator.class.getSimpleName());
+            OperatorContext operatorContext = driverContext.addOperatorContext(operatorId, planNodeId, HashSemiJoinOperator.class.getSimpleName());
             return new HashSemiJoinOperator(operatorContext, setSupplier, probeTypes, probeJoinChannel);
         }
 
@@ -174,7 +174,12 @@ public class HashSemiJoinOperator
         // update hashing strategy to use probe cursor
         for (int position = 0; position < page.getPositionCount(); position++) {
             if (probeJoinPage.getBlock(0).isNull(position)) {
-                blockBuilder.appendNull();
+                if (channelSet.isEmpty()) {
+                    BOOLEAN.writeBoolean(blockBuilder, false);
+                }
+                else {
+                    blockBuilder.appendNull();
+                }
             }
             else {
                 boolean contains = channelSet.contains(position, probeJoinPage);

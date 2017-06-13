@@ -65,8 +65,8 @@ import static com.facebook.presto.memory.LocalMemoryManager.RESERVED_POOL;
 import static com.facebook.presto.spi.NodeState.ACTIVE;
 import static com.facebook.presto.spi.NodeState.SHUTTING_DOWN;
 import static com.facebook.presto.spi.StandardErrorCode.CLUSTER_OUT_OF_MEMORY;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableSet;
+import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Sets.difference;
 import static io.airlift.units.DataSize.succinctBytes;
 import static io.airlift.units.Duration.nanosSince;
@@ -351,7 +351,7 @@ public class ClusterMemoryManager
             pools.remove(removed);
             if (changeListeners.containsKey(removed)) {
                 for (Consumer<MemoryPoolInfo> listener : changeListeners.get(removed)) {
-                    listenerExecutor.execute(() -> listener.accept(new MemoryPoolInfo(0, 0, ImmutableMap.of())));
+                    listenerExecutor.execute(() -> listener.accept(new MemoryPoolInfo(0, 0, 0, ImmutableMap.of(), ImmutableMap.of())));
                 }
             }
         }

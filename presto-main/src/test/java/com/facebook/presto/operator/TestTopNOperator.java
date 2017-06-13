@@ -36,10 +36,11 @@ import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.facebook.presto.testing.MaterializedResult.resultBuilder;
 import static com.facebook.presto.testing.TestingTaskContext.createTaskContext;
+import static com.facebook.presto.testing.assertions.Assert.assertEquals;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
 import static io.airlift.units.DataSize.Unit.BYTE;
+import static io.airlift.units.DataSize.Unit.MEGABYTE;
 import static java.util.concurrent.Executors.newCachedThreadPool;
-import static org.testng.Assert.assertEquals;
 
 @Test(singleThreaded = true)
 public class TestTopNOperator
@@ -52,7 +53,7 @@ public class TestTopNOperator
     {
         executor = newCachedThreadPool(daemonThreadsNamed("test-%s"));
         driverContext = createTaskContext(executor, TEST_SESSION)
-                .addPipelineContext(true, true)
+                .addPipelineContext(0, true, true)
                 .addDriverContext();
     }
 
@@ -86,7 +87,8 @@ public class TestTopNOperator
                 2,
                 ImmutableList.of(0),
                 ImmutableList.of(DESC_NULLS_LAST),
-                false);
+                false,
+                new DataSize(16, MEGABYTE));
 
         MaterializedResult expected = resultBuilder(driverContext.getSession(), BIGINT, DOUBLE)
                 .row(6L, 0.6)
@@ -119,7 +121,8 @@ public class TestTopNOperator
                 3,
                 ImmutableList.of(0, 1),
                 ImmutableList.of(DESC_NULLS_LAST, DESC_NULLS_LAST),
-                false);
+                false,
+                new DataSize(16, MEGABYTE));
 
         MaterializedResult expected = MaterializedResult.resultBuilder(driverContext.getSession(), VARCHAR, BIGINT)
                 .row("f", 3L)
@@ -154,7 +157,8 @@ public class TestTopNOperator
                 2,
                 ImmutableList.of(0),
                 ImmutableList.of(ASC_NULLS_LAST),
-                false);
+                false,
+                new DataSize(16, MEGABYTE));
 
         MaterializedResult expected = resultBuilder(driverContext.getSession(), BIGINT, DOUBLE)
                 .row(-1L, -0.1)
@@ -177,19 +181,13 @@ public class TestTopNOperator
                 0,
                 ImmutableList.of(0),
                 ImmutableList.of(DESC_NULLS_LAST),
-                false);
+                false,
+                new DataSize(16, MEGABYTE));
 
         try (Operator operator = factory.createOperator(driverContext)) {
-            MaterializedResult expected = resultBuilder(driverContext.getSession(), BIGINT).build();
-
-            // assertOperatorEquals assumes operators do not start in finished state
             assertEquals(operator.isFinished(), true);
             assertEquals(operator.needsInput(), false);
             assertEquals(operator.getOutput(), null);
-
-            List<Page> pages = OperatorAssertion.toPages(operator, input.iterator());
-            MaterializedResult actual = OperatorAssertion.toMaterializedResult(operator.getOperatorContext().getSession(), operator.getTypes(), pages);
-            assertEquals(actual, expected);
         }
     }
 
@@ -203,8 +201,8 @@ public class TestTopNOperator
                 .row(2L)
                 .build();
 
-        DriverContext smallDiverContext = createTaskContext(executor, TEST_SESSION, new DataSize(1, BYTE), new DataSize(0, BYTE))
-                .addPipelineContext(true, true)
+        DriverContext smallDiverContext = createTaskContext(executor, TEST_SESSION, new DataSize(1, BYTE))
+                .addPipelineContext(0, true, true)
                 .addDriverContext();
 
         TopNOperatorFactory operatorFactory = new TopNOperatorFactory(
@@ -214,7 +212,8 @@ public class TestTopNOperator
                 100,
                 ImmutableList.of(0),
                 ImmutableList.of(ASC_NULLS_LAST),
-                true);
+                true,
+                new DataSize(0, MEGABYTE));
 
         MaterializedResult expected = resultBuilder(driverContext.getSession(), BIGINT)
                 .row(1L)

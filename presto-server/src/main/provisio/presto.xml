@@ -50,26 +50,14 @@
         </artifact>
     </artifactSet>
 
-    <artifactSet to="plugin/hive-cdh4">
-        <artifact id="${project.groupId}:presto-hive-cdh4:zip:${project.version}">
-            <unpack />
-        </artifact>
-    </artifactSet>
-
-    <artifactSet to="plugin/hive-cdh5">
-        <artifact id="${project.groupId}:presto-hive-cdh5:zip:${project.version}">
-            <unpack />
-        </artifact>
-    </artifactSet>
-
-    <artifactSet to="plugin/hive-hadoop1">
-        <artifact id="${project.groupId}:presto-hive-hadoop1:zip:${project.version}">
-            <unpack />
-        </artifact>
-    </artifactSet>
-
     <artifactSet to="plugin/hive-hadoop2">
         <artifact id="${project.groupId}:presto-hive-hadoop2:zip:${project.version}">
+            <unpack />
+        </artifact>
+    </artifactSet>
+
+    <artifactSet to="plugin/memory">
+        <artifact id="${project.groupId}:presto-memory:zip:${project.version}">
             <unpack />
         </artifact>
     </artifactSet>
@@ -110,6 +98,12 @@
         </artifact>
     </artifactSet>
 
+    <artifactSet to="plugin/sqlserver">
+        <artifact id="${project.groupId}:presto-sqlserver:zip:${project.version}">
+            <unpack />
+        </artifact>
+    </artifactSet>
+
     <artifactSet to="plugin/raptor">
         <artifact id="${project.groupId}:presto-raptor:zip:${project.version}">
             <unpack />
@@ -124,6 +118,12 @@
 
     <artifactSet to="plugin/tpch">
         <artifact id="${project.groupId}:presto-tpch:zip:${project.version}">
+            <unpack />
+        </artifact>
+    </artifactSet>
+
+    <artifactSet to="plugin/tpcds">
+        <artifact id="${project.groupId}:presto-tpcds:zip:${project.version}">
             <unpack />
         </artifact>
     </artifactSet>

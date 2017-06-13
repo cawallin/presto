@@ -11,7 +11,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.facebook.presto.execution;
 
 import com.facebook.presto.Session;
@@ -32,6 +31,7 @@ import static com.facebook.presto.sql.QueryUtil.selectList;
 import static com.facebook.presto.sql.QueryUtil.simpleQuery;
 import static com.facebook.presto.sql.QueryUtil.table;
 import static com.facebook.presto.sql.analyzer.SemanticErrorCode.INVALID_PARAMETER_USAGE;
+import static com.facebook.presto.testing.TestingSession.testSessionBuilder;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.fail;
 
@@ -52,7 +52,9 @@ public class TestUnwrapExecute
     public void testExecuteStatement()
             throws Exception
     {
-        Session session = TEST_SESSION.withPreparedStatement("my_query", "SELECT * FROM foo");
+        Session session = testSessionBuilder()
+                .addPreparedStatement("my_query", "SELECT * FROM foo")
+                .build();
         Statement statement = SQL_PARSER.createStatement("EXECUTE my_query");
         assertEquals(unwrapExecuteStatement(statement, SQL_PARSER, session),
                 simpleQuery(selectList(new AllColumns()), table(QualifiedName.of("foo"))));
@@ -77,7 +79,9 @@ public class TestUnwrapExecute
             throws Exception
     {
         try {
-            Session session = TEST_SESSION.withPreparedStatement("my_query", "SELECT * FROM foo where col1 = ?");
+            Session session = testSessionBuilder()
+                    .addPreparedStatement("my_query", "SELECT * FROM foo where col1 = ?")
+                    .build();
             Statement statement = SQL_PARSER.createStatement("EXECUTE my_query USING 1,2");
             validateParameters(unwrapExecuteStatement(statement, SQL_PARSER, session), ((Execute) statement).getParameters());
             fail("expected exception");
@@ -92,7 +96,9 @@ public class TestUnwrapExecute
             throws Exception
     {
         try {
-            Session session = TEST_SESSION.withPreparedStatement("my_query", "SELECT ? FROM foo where col1 = ?");
+            Session session = testSessionBuilder()
+                    .addPreparedStatement("my_query", "SELECT ? FROM foo where col1 = ?")
+                    .build();
             Statement statement = SQL_PARSER.createStatement("EXECUTE my_query USING 1");
             validateParameters(unwrapExecuteStatement(statement, SQL_PARSER, session), ((Execute) statement).getParameters());
             fail("expected exception");

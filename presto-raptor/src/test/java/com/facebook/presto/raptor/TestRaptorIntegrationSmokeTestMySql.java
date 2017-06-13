@@ -15,7 +15,6 @@ package com.facebook.presto.raptor;
 
 import com.facebook.presto.tests.DistributedQueryRunner;
 import com.facebook.presto.tpch.TpchPlugin;
-import com.facebook.presto.tpch.testing.SampledTpchPlugin;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.testing.mysql.TestingMySqlServer;
 import org.testng.annotations.AfterClass;
@@ -25,11 +24,7 @@ import java.io.File;
 import java.util.Map;
 
 import static com.facebook.presto.raptor.RaptorQueryRunner.copyTables;
-import static com.facebook.presto.raptor.RaptorQueryRunner.createSampledSession;
 import static com.facebook.presto.raptor.RaptorQueryRunner.createSession;
-import static com.google.common.collect.Iterables.getOnlyElement;
-import static io.airlift.testing.Closeables.closeAllRuntimeException;
-import static java.lang.String.format;
 
 @Test
 public class TestRaptorIntegrationSmokeTestMySql
@@ -43,20 +38,20 @@ public class TestRaptorIntegrationSmokeTestMySql
         this(new TestingMySqlServer("testuser", "testpass", "testdb"));
     }
 
-    public TestRaptorIntegrationSmokeTestMySql(TestingMySqlServer mysqlServer)
+    private TestRaptorIntegrationSmokeTestMySql(TestingMySqlServer mysqlServer)
             throws Exception
     {
-        super(createRaptorMySqlQueryRunner(mysqlServer));
+        super(() -> createRaptorMySqlQueryRunner(mysqlServer.getJdbcUrl("testdb")));
         this.mysqlServer = mysqlServer;
     }
 
     @AfterClass(alwaysRun = true)
     public final void destroy()
     {
-        closeAllRuntimeException(mysqlServer);
+        mysqlServer.close();
     }
 
-    private static DistributedQueryRunner createRaptorMySqlQueryRunner(TestingMySqlServer server)
+    private static DistributedQueryRunner createRaptorMySqlQueryRunner(String mysqlUrl)
             throws Exception
     {
         DistributedQueryRunner queryRunner = new DistributedQueryRunner(createSession("tpch"), 2);
@@ -64,14 +59,11 @@ public class TestRaptorIntegrationSmokeTestMySql
         queryRunner.installPlugin(new TpchPlugin());
         queryRunner.createCatalog("tpch", "tpch");
 
-        queryRunner.installPlugin(new SampledTpchPlugin());
-        queryRunner.createCatalog("tpch_sampled", "tpch_sampled");
-
         queryRunner.installPlugin(new RaptorPlugin());
         File baseDir = queryRunner.getCoordinator().getBaseDataDir().toFile();
         Map<String, String> raptorProperties = ImmutableMap.<String, String>builder()
                 .put("metadata.db.type", "mysql")
-                .put("metadata.db.url", jdbcUrl(server))
+                .put("metadata.db.url", mysqlUrl)
                 .put("storage.data-directory", new File(baseDir, "data").getAbsolutePath())
                 .put("storage.max-shard-rows", "2000")
                 .put("backup.provider", "file")
@@ -81,17 +73,7 @@ public class TestRaptorIntegrationSmokeTestMySql
         queryRunner.createCatalog("raptor", "raptor", raptorProperties);
 
         copyTables(queryRunner, "tpch", createSession(), false);
-        copyTables(queryRunner, "tpch_sampled", createSampledSession(), false);
 
         return queryRunner;
-    }
-
-    private static String jdbcUrl(TestingMySqlServer server)
-    {
-        return format("jdbc:mysql://localhost:%d/%s?user=%s&password=%s",
-                server.getPort(),
-                getOnlyElement(server.getDatabases()),
-                server.getUser(),
-                server.getPassword());
     }
 }

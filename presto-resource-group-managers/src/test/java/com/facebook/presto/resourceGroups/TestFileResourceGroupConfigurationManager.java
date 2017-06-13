@@ -42,6 +42,8 @@ public class TestFileResourceGroupConfigurationManager
         assertFails("resource_groups_config_bad_root.json", "Duplicated root group: global");
         assertFails("resource_groups_config_bad_sub_group.json", "Duplicated sub group: sub");
         assertFails("resource_groups_config_bad_group_id.json", "Invalid resource group name. 'glo.bal' contains a '.'");
+        assertFails("resource_groups_config_bad_query_priority_scheduling_policy.json", "Must use \"weighted\" scheduling policy when using scheduling weight");
+        assertFails("resource_groups_config_bad_weighted_scheduling_policy.json", "Must specify scheduling weight for each sub group when using \"weighted\" scheduling policy");
     }
 
     @Test(expectedExceptions = IllegalStateException.class, expectedExceptionsMessageRegExp = "No matching configuration found for: missing")
@@ -78,6 +80,12 @@ public class TestFileResourceGroupConfigurationManager
         assertEquals(sub.getJmxExport(), false);
     }
 
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "Selector refers to nonexistent group: a.b.c.X")
+    public void testNonExistentGroup()
+    {
+        parse("resource_groups_config_bad_selector.json");
+    }
+
     private FileResourceGroupConfigurationManager parse(String fileName)
     {
         FileResourceGroupConfig config = new FileResourceGroupConfig();
@@ -100,10 +108,17 @@ public class TestFileResourceGroupConfigurationManager
             fail("Expected parsing to fail");
         }
         catch (RuntimeException e) {
-            assertTrue(e.getCause() instanceof JsonMappingException);
-            assertTrue(e.getCause().getCause() instanceof IllegalArgumentException);
-            assertTrue(Pattern.matches(expectedPattern, e.getCause().getCause().getMessage()),
-                    "\nExpected (re) :" + expectedPattern + "\nActual        :" + e.getCause().getCause().getMessage());
+            Throwable cause = e.getCause();
+            if (cause == null) {
+                cause = e;
+            }
+            else {
+                assertTrue(cause instanceof JsonMappingException);
+                cause = cause.getCause();
+            }
+            assertTrue(cause instanceof IllegalArgumentException);
+            assertTrue(Pattern.matches(expectedPattern, cause.getMessage()),
+                    "\nExpected (re) :" + expectedPattern + "\nActual        :" + cause.getMessage());
         }
     }
 }
